@@ -1,0 +1,52 @@
+# ── Python ────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual environments ──────────────────────────────────────────
+.venv/
+venv/
+env/
+.env/
+
+# ── Environment / secrets ─────────────────────────────────────────
+# .env contains real credentials — NEVER commit it
+.env
+.env.*
+!.env.example
+
+# ── IDE ───────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.iml
+
+# ── Testing / coverage ────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+*.xml
+.tox/
+
+# ── Alembic generated migrations are kept under version control.   #
+# Do NOT add alembic/versions/ here.
+
+# ── OS ────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Model cache (large binary files) ─────────────────────────────
+# HuggingFace model cache — never commit downloaded weights
+*.bin
+*.safetensors
+*.pt
+*.onnx
+
+# ── Logs ──────────────────────────────────────────────────────────
+*.log
+logs/
