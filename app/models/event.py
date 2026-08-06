@@ -81,7 +81,8 @@ class UserEvent(Base):
     event_type      EventType ENUM
     product_id      optional — product this event relates to
     search_query    optional — raw query string for SEARCH events
-    metadata        JSONB — additional context (rating value, position, etc.)
+    event_metadata  JSONB — additional context (rating value, position, etc.)
+                    (DB column name: ``metadata``)
     created_at      UTC timestamp of the event (immutable)
     """
 
@@ -122,7 +123,8 @@ class UserEvent(Base):
         nullable=True,
         comment="Search query string — populated for SEARCH events",
     )
-    metadata: Mapped[dict] = mapped_column(
+    event_metadata: Mapped[dict] = mapped_column(
+        "metadata",   # DB column name stays "metadata"
         JSONB,
         nullable=False,
         default=dict,
@@ -145,8 +147,9 @@ class UserEvent(Base):
             kwargs["id"] = uuid.uuid4()
         if "created_at" not in kwargs:
             kwargs["created_at"] = datetime.now(tz=timezone.utc)
-        if "metadata" not in kwargs:
-            kwargs["metadata"] = {}
+        # Accept both "metadata" (raw DB dict) and "event_metadata" (Python attr)
+        if "event_metadata" not in kwargs and "metadata" not in kwargs:
+            kwargs["event_metadata"] = {}
         super().__init__(**kwargs)
 
     def __repr__(self) -> str:

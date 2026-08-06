@@ -11,18 +11,21 @@ an authenticated user.
 
 Endpoints
 ~~~~~~~~~
-POST /api/v1/events/batch  — ingest 1-500 events in one request
+POST /api/v1/events/batch  — ingest 1-500 events; auto-triggers reco generation
 GET  /api/v1/events/me     — paginated list of the current user's events
 
-Design notes
-~~~~~~~~~~~~
-- The router is intentionally thin: auth and pagination params are
-  resolved here; all logic lives in ``EventService``.
-- ``user_id`` is ALWAYS taken from the JWT ``sub`` claim — clients
-  cannot submit events on behalf of another user.
-- ``POST /events/batch`` returns 202 Accepted (not 201) to signal that
-  events are accepted for processing (analytics pipelines may queue
-  them downstream in future iterations).
+Auto-trigger design
+~~~~~~~~~~~~~~~~~~~
+After every successful batch ingest, we evaluate the four trigger rules
+(``RecommendationService.should_generate``) against the authenticated
+user's event history.  If any rule fires, the LangGraph recommendation
+workflow is invoked synchronously within the same request.
+
+This is intentionally simple for v1.  In production you would push the
+``user_id`` onto a background task queue (Celery/RQ/ARQ) instead of
+calling the service inline, so the HTTP response doesn't block on LLM
+latency.  The architecture is identical — only the invocation mechanism
+changes.
 """
 
 from __future__ import annotations
@@ -33,6 +36,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user
+from app.core.logging import get_logger
 from app.database.session import get_db
 from app.models.event import EventType
 from app.models.user import User
@@ -43,18 +47,24 @@ from app.schemas.event import (
     EventResponse,
 )
 from app.services.event_service import EventService
+from app.services.recommendation_service import RecommendationService
 
 router = APIRouter(prefix="/events", tags=["Events"])
+logger = get_logger(__name__)
 
 _MAX_PAGE_SIZE = 100
 
 
 # ------------------------------------------------------------------ #
-# Dependency                                                          #
+# Dependencies                                                        #
 # ------------------------------------------------------------------ #
 
 def _get_event_service(db: Session = Depends(get_db)) -> EventService:
     return EventService(db)
+
+
+def _get_recommendation_service(db: Session = Depends(get_db)) -> RecommendationService:
+    return RecommendationService(db)
 
 
 # ------------------------------------------------------------------ #
@@ -75,17 +85,59 @@ def _get_event_service(db: Session = Depends(get_db)) -> EventService:
 def ingest_batch(
     payload: BatchEventRequest,
     current_user: User = Depends(get_current_user),
-    service: EventService = Depends(_get_event_service),
+    event_svc: EventService = Depends(_get_event_service),
+    reco_svc: RecommendationService = Depends(_get_recommendation_service),
 ) -> BatchEventResponse:
     """
-    Store 1 – 500 events in a single atomic transaction.
+    Store 1–500 events in a single atomic transaction, then check whether
+    a new recommendation should be generated.
 
-    - ``user_id`` is resolved from the Bearer token — do NOT send it in the body.
-    - All events in the batch must be valid; if any fail validation the
-      entire request is rejected with 422 before any DB writes occur.
-    - On success, returns the count and UUIDs of stored events.
+    Auto-trigger behaviour
+    ~~~~~~~~~~~~~~~~~~~~~~
+    After persisting the events, ``RecommendationService.should_generate``
+    evaluates four rules:
+
+    1. **new_events_threshold** — ≥ 20 new events since last recommendation.
+    2. **repeated_search** — same query submitted more than once.
+    3. **purchase_or_wishlist** — any high-intent event in the window.
+    4. **inactivity_reengagement** — silent for ≥ 10 minutes.
+
+    If any rule fires, the full LangGraph workflow runs and the result is
+    persisted before the response is returned.  If the trigger doesn't
+    fire, or if generation fails, the batch response is returned unchanged
+    (trigger errors are logged but never surface to the caller).
+
+    ``user_id`` is always taken from the JWT ``sub`` claim.
     """
-    return service.ingest_batch(user_id=current_user.id, payload=payload)
+    # 1. Persist events
+    result = event_svc.ingest_batch(user_id=current_user.id, payload=payload)
+
+    # 2. Evaluate trigger rules
+    try:
+        trigger_status = reco_svc.should_generate(current_user.id)
+        logger.info(
+            "trigger_evaluated user_id=%s should_trigger=%s reason=%s rules=%s",
+            current_user.id,
+            trigger_status.should_trigger,
+            trigger_status.reason,
+            trigger_status.rules_evaluated,
+        )
+
+        if trigger_status.should_trigger:
+            logger.info(
+                "trigger_fired user_id=%s reason=%s — starting recommendation workflow",
+                current_user.id,
+                trigger_status.reason,
+            )
+            reco_svc.generate(user_id=current_user.id)
+
+    except Exception as exc:
+        # Never let trigger/generation failures break the event ingest response
+        logger.error(
+            "trigger_error user_id=%s error=%s", current_user.id, exc
+        )
+
+    return result
 
 
 @router.get(

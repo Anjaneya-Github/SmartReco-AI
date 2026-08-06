@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Admin Dashboard — SmartReco AI{% endblock %}
+{% block content %}
+<div class="container-fluid px-4 py-4">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h4 class="fw-bold mb-0"><i class="bi bi-shield-check me-2 text-warning"></i>Admin Dashboard</h4>
+    <a href="/admin/products" class="btn btn-outline-primary btn-sm"><i class="bi bi-plus-circle me-1"></i>Manage Products</a>
+  </div>
+  <div id="analytics-loading" class="text-center py-4"><div class="spinner-border text-warning"></div></div>
+  <div id="analytics-content" class="d-none">
+    <!-- Stat cards -->
+    <div class="row g-3 mb-4" id="stat-cards"></div>
+    <div class="row g-4">
+      <!-- Top Categories -->
+      <div class="col-md-4">
+        <div class="card h-100">
+          <div class="card-header fw-semibold"><i class="bi bi-bar-chart me-2 text-info"></i>Top Categories</div>
+          <ul class="list-group list-group-flush" id="cat-list"></ul>
+        </div>
+      </div>
+      <!-- Top Searches -->
+      <div class="col-md-4">
+        <div class="card h-100">
+          <div class="card-header fw-semibold"><i class="bi bi-search me-2 text-primary"></i>Top Searches</div>
+          <ul class="list-group list-group-flush" id="search-list"></ul>
+        </div>
+      </div>
+      <!-- Most Viewed -->
+      <div class="col-md-4">
+        <div class="card h-100">
+          <div class="card-header fw-semibold"><i class="bi bi-eye me-2 text-success"></i>Most Viewed Products</div>
+          <ul class="list-group list-group-flush" id="viewed-list"></ul>
+        </div>
+      </div>
+    </div>
+    <!-- Generate Recommendation -->
+    <div class="card mt-4">
+      <div class="card-header fw-semibold"><i class="bi bi-stars me-2 text-warning"></i>Generate Recommendation</div>
+      <div class="card-body d-flex gap-3">
+        <input type="text" id="gen-user-id" class="form-control" placeholder="User UUID" style="max-width:400px"/>
+        <button class="btn btn-warning" onclick="generateReco()">
+          <span id="gen-spinner" class="spinner-border spinner-border-sm d-none me-1"></span>
+          <i class="bi bi-cpu me-1"></i>Run AI Workflow
+        </button>
+      </div>
+      <div id="gen-result" class="card-footer d-none small text-success"></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+const token = localStorage.getItem('access_token');
+if(!token) window.location='/login';
+
+async function loadAnalytics(){
+  const r = await fetch('/api/v1/dashboard/analytics',{headers:{'Authorization':'Bearer '+token}});
+  if(r.status===403){ document.getElementById('analytics-loading').innerHTML='<p class="text-danger">Admin access required.</p>'; return; }
+  const d = await r.json();
+  document.getElementById('analytics-loading').classList.add('d-none');
+  document.getElementById('analytics-content').classList.remove('d-none');
+
+  const stats = [
+    {label:'Users', value:d.total_users, icon:'bi-people', color:'primary'},
+    {label:'Products', value:d.total_products, icon:'bi-grid', color:'info'},
+    {label:'Events', value:d.total_events, icon:'bi-activity', color:'success'},
+    {label:'Recommendations', value:d.total_recommendations, icon:'bi-stars', color:'warning'},
+  ];
+  document.getElementById('stat-cards').innerHTML = stats.map(s=>`
+    <div class="col-6 col-md-3">
+      <div class="card stat-card text-center p-3">
+        <i class="bi ${s.icon} text-${s.color} fs-3 mb-1"></i>
+        <h3 class="fw-bold mb-0">${s.value.toLocaleString()}</h3>
+        <div class="text-muted small">${s.label}</div>
+      </div>
+    </div>`).join('');
+
+  const listHtml = (items, keyLabel, countKey) =>
+    items.length ? items.map(i=>`<li class="list-group-item d-flex justify-content-between">
+      <span class="small">${i[keyLabel]||'—'}</span><span class="badge bg-secondary">${i[countKey]}</span></li>`).join('')
+    : '<li class="list-group-item text-muted small">No data yet.</li>';
+
+  document.getElementById('cat-list').innerHTML = listHtml(d.top_categories,'category','count');
+  document.getElementById('search-list').innerHTML = listHtml(d.top_searches,'query','count');
+  document.getElementById('viewed-list').innerHTML = listHtml(d.most_viewed_products,'title','count');
+}
+
+async function generateReco(){
+  const uid = document.getElementById('gen-user-id').value.trim();
+  if(!uid){ showToast('Enter a user UUID','warning'); return; }
+  const btn = document.querySelector('[onclick="generateReco()"]');
+  const spin = document.getElementById('gen-spinner');
+  btn.disabled=true; spin.classList.remove('d-none');
+  try{
+    const r = await fetch('/api/v1/recommendations/generate',{
+      method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+      body:JSON.stringify({user_id:uid,max_products:20})});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail||'Failed');
+    const res = document.getElementById('gen-result');
+    res.textContent = `✓ Generated! Confidence: ${(d.confidence_score||d.confidence||0).toFixed(2)} · Products: ${(d.recommended_products||[]).length}`;
+    res.classList.remove('d-none');
+    showToast('Recommendation generated!','success');
+  }catch(e){ showToast(e.message,'danger'); }
+  finally{ btn.disabled=false; spin.classList.add('d-none'); }
+}
+
+loadAnalytics();
+</script>
+{% endblock %}

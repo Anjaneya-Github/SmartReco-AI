@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Login — SmartReco AI{% endblock %}
+{% block content %}
+<div class="container d-flex justify-content-center align-items-center" style="min-height:90vh">
+  <div class="card p-4 shadow" style="width:100%;max-width:420px">
+    <div class="text-center mb-4">
+      <i class="bi bi-cpu-fill text-primary" style="font-size:2.5rem"></i>
+      <h4 class="mt-2 fw-bold">SmartReco AI</h4>
+      <p class="text-muted small">AI-Powered Learning Recommendations</p>
+    </div>
+    <div id="login-error" class="alert alert-danger d-none"></div>
+    <form id="login-form">
+      <div class="mb-3">
+        <label class="form-label">Email</label>
+        <input type="email" class="form-control" id="email" placeholder="you@example.com" required/>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Password</label>
+        <input type="password" class="form-control" id="password" placeholder="••••••••" required/>
+      </div>
+      <button type="submit" class="btn btn-primary w-100" id="login-btn">
+        <span id="login-spinner" class="spinner-border spinner-border-sm d-none me-2"></span>
+        Sign In
+      </button>
+    </form>
+    <hr class="my-3"/>
+    <p class="text-center text-muted small mb-0">
+      Don't have an account?
+      <a href="#" onclick="showRegister()">Register</a>
+    </p>
+    <div id="register-section" class="d-none mt-3">
+      <input type="text" class="form-control mb-2" id="reg-name" placeholder="Full name (optional)"/>
+      <input type="email" class="form-control mb-2" id="reg-email" placeholder="Email"/>
+      <input type="password" class="form-control mb-2" id="reg-password" placeholder="Password (8+ chars, 1 uppercase, 1 digit)"/>
+      <button class="btn btn-success w-100" onclick="register()">Create Account</button>
+    </div>
+  </div>
+</div>
+<script>
+  if(localStorage.getItem('access_token')) window.location='/dashboard';
+  function showRegister(){ document.getElementById('register-section').classList.toggle('d-none'); }
+  document.getElementById('login-form').addEventListener('submit', async(e)=>{
+    e.preventDefault();
+    const btn=document.getElementById('login-btn');
+    const spin=document.getElementById('login-spinner');
+    const err=document.getElementById('login-error');
+    btn.disabled=true; spin.classList.remove('d-none'); err.classList.add('d-none');
+    try{
+      const r=await fetch('/api/v1/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({email:document.getElementById('email').value, password:document.getElementById('password').value})});
+      const d=await r.json();
+      if(!r.ok) throw new Error(d.detail||'Login failed');
+      localStorage.setItem('access_token', d.access_token);
+      window.location='/dashboard';
+    }catch(ex){ err.textContent=ex.message; err.classList.remove('d-none'); }
+    finally{ btn.disabled=false; spin.classList.add('d-none'); }
+  });
+  async function register(){
+    const r=await fetch('/api/v1/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({email:document.getElementById('reg-email').value,
+        full_name:document.getElementById('reg-name').value||null,
+        password:document.getElementById('reg-password').value})});
+    const d=await r.json();
+    if(!r.ok){ showToast(d.detail||'Registration failed','danger'); return; }
+    showToast('Account created! Please sign in.','success');
+    document.getElementById('register-section').classList.add('d-none');
+  }
+</script>
+{% endblock %}

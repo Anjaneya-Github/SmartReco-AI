@@ -179,7 +179,7 @@ class TestGetMyEvents:
         e.event_type = event_type
         e.product_id = uuid.uuid4()
         e.search_query = None
-        e.metadata = {}
+        e.event_metadata = {}
         e.created_at = datetime.now(tz=timezone.utc)
         return e
 

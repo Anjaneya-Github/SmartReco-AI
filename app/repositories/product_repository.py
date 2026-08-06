@@ -35,15 +35,6 @@ class ProductRepository:
     # ------------------------------------------------------------------ #
 
     def get_by_id(self, product_id: uuid.UUID) -> Product | None:
-        """
-        Fetch a product by its UUID primary key.
-
-        Args:
-            product_id: UUID of the product.
-
-        Returns:
-            The ``Product`` instance, or ``None`` if not found.
-        """
         return self._db.get(Product, product_id)
 
     def list_active(
@@ -52,22 +43,10 @@ class ProductRepository:
         skip: int = 0,
         limit: int = 20,
     ) -> tuple[list[Product], int]:
-        """
-        Return a page of **active** products and the total active count.
-
-        Args:
-            skip:  Number of rows to skip (offset).
-            limit: Maximum number of rows to return.
-
-        Returns:
-            Tuple of (items, total_count).
-        """
         base_filter = Product.is_active.is_(True)
-
         total: int = self._db.execute(
             select(func.count(Product.id)).where(base_filter)
         ).scalar_one()
-
         items: list[Product] = list(
             self._db.execute(
                 select(Product)
@@ -77,7 +56,6 @@ class ProductRepository:
                 .limit(limit)
             ).scalars().all()
         )
-
         return items, total
 
     def list_all(
@@ -86,20 +64,9 @@ class ProductRepository:
         skip: int = 0,
         limit: int = 20,
     ) -> tuple[list[Product], int]:
-        """
-        Return a page of **all** products (including inactive) — admin use.
-
-        Args:
-            skip:  Number of rows to skip.
-            limit: Maximum number of rows to return.
-
-        Returns:
-            Tuple of (items, total_count).
-        """
         total: int = self._db.execute(
             select(func.count(Product.id))
         ).scalar_one()
-
         items: list[Product] = list(
             self._db.execute(
                 select(Product)
@@ -108,45 +75,47 @@ class ProductRepository:
                 .limit(limit)
             ).scalars().all()
         )
-
         return items, total
+
+    def get_by_ids(self, product_ids: list[uuid.UUID]) -> list[Product]:
+        """
+        Fetch multiple products by their UUIDs in a single query.
+
+        Used by the behavior analyzer to resolve product metadata
+        (category, tags) for a user's viewed/clicked products.
+
+        Args:
+            product_ids: List of product UUIDs to fetch.
+
+        Returns:
+            List of ``Product`` instances that exist and are active.
+            Order is not guaranteed.
+        """
+        if not product_ids:
+            return []
+        return list(
+            self._db.execute(
+                select(Product).where(
+                    Product.id.in_(product_ids),
+                    Product.is_active.is_(True),
+                )
+            )
+            .scalars()
+            .all()
+        )
 
     # ------------------------------------------------------------------ #
     # Writes                                                              #
     # ------------------------------------------------------------------ #
 
     def create(self, data: dict[str, Any]) -> Product:
-        """
-        Persist a new product and return it.
-
-        Does **not** commit — the service controls the transaction
-        boundary so it can roll back if the subsequent Qdrant write fails.
-
-        Args:
-            data: Column values as a plain dict.
-
-        Returns:
-            Newly created ``Product`` instance with all fields populated.
-        """
         product = Product(**data)
         self._db.add(product)
-        self._db.flush()       # generates id / timestamps without committing
+        self._db.flush()
         self._db.refresh(product)
         return product
 
     def update(self, product: Product, data: dict[str, Any]) -> Product:
-        """
-        Apply *data* to an existing product and return it.
-
-        Does **not** commit.
-
-        Args:
-            product: The ORM instance to update (must be session-attached).
-            data:    Column values to set.
-
-        Returns:
-            Updated ``Product`` instance.
-        """
         for key, value in data.items():
             setattr(product, key, value)
         self._db.flush()
@@ -154,13 +123,5 @@ class ProductRepository:
         return product
 
     def delete(self, product: Product) -> None:
-        """
-        Hard-delete a product row.
-
-        Does **not** commit — caller decides the transaction boundary.
-
-        Args:
-            product: The ORM instance to delete.
-        """
         self._db.delete(product)
         self._db.flush()

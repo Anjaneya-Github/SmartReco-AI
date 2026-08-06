@@ -17,6 +17,7 @@ boundary so it can roll back atomically on any error.
 from __future__ import annotations
 
 import uuid
+from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
 
@@ -56,10 +57,6 @@ class EventRepository:
 
         Optional keys: product_id, search_query.
 
-        The method assigns a UUID and ``created_at`` timestamp to every
-        row server-side (Python), so the objects are usable immediately
-        without a DB round-trip.
-
         Args:
             rows: List of column-value dicts (one per event).
 
@@ -75,22 +72,18 @@ class EventRepository:
             ids.append(eid)
             enriched.append(
                 {
-                    "id": eid,
-                    "created_at": now,
                     "metadata": {},
-                    **row,                    # caller values override defaults
-                    "id": eid,               # id is always our generated UUID
-                    "created_at": now,       # timestamp is always server-set
+                    **row,
+                    "id": eid,          # always our generated UUID
+                    "created_at": now,  # always server-set
                 }
             )
 
-        # bulk_insert_mappings issues one multi-row INSERT statement —
-        # dramatically faster than N individual session.add() calls.
         self._db.bulk_insert_mappings(UserEvent, enriched)  # type: ignore[arg-type]
         return ids
 
     # ------------------------------------------------------------------ #
-    # Reads                                                               #
+    # Reads — pagination                                                  #
     # ------------------------------------------------------------------ #
 
     def list_by_user(
@@ -134,3 +127,84 @@ class EventRepository:
         )
 
         return events, total
+
+    # ------------------------------------------------------------------ #
+    # Reads — behavior analysis                                          #
+    # ------------------------------------------------------------------ #
+
+    def get_recent_events(
+        self,
+        user_id: uuid.UUID,
+        limit: int = 200,
+    ) -> list[UserEvent]:
+        """
+        Return the most recent *limit* events for *user_id*, newest first.
+
+        Used by the behavior analyzer to build an in-memory profile
+        without loading the entire event history.
+
+        Args:
+            user_id: Target user's UUID.
+            limit:   Maximum number of events to fetch (default 200).
+
+        Returns:
+            List of ``UserEvent`` instances ordered by ``created_at DESC``.
+        """
+        return list(
+            self._db.execute(
+                select(UserEvent)
+                .where(UserEvent.user_id == user_id)
+                .order_by(UserEvent.created_at.desc())
+                .limit(limit)
+            )
+            .scalars()
+            .all()
+        )
+
+    def count_since(
+        self,
+        user_id: uuid.UUID,
+        since: datetime,
+        event_type: EventType | None = None,
+    ) -> int:
+        """
+        Count events for *user_id* after *since*.
+
+        Used by ``RecommendationTriggerService`` to check thresholds.
+
+        Args:
+            user_id:    Target user.
+            since:      Inclusive lower bound for ``created_at``.
+            event_type: Optional type filter.
+
+        Returns:
+            Integer count.
+        """
+        filters = [
+            UserEvent.user_id == user_id,
+            UserEvent.created_at >= since,
+        ]
+        if event_type is not None:
+            filters.append(UserEvent.event_type == event_type)
+
+        return self._db.execute(
+            select(func.count(UserEvent.id)).where(*filters)
+        ).scalar_one()
+
+    def get_last_event_time(self, user_id: uuid.UUID) -> datetime | None:
+        """
+        Return the timestamp of the user's most recent event, or ``None``
+        if the user has no events at all.
+
+        Args:
+            user_id: Target user.
+
+        Returns:
+            Timezone-aware UTC datetime or ``None``.
+        """
+        result = self._db.execute(
+            select(func.max(UserEvent.created_at)).where(
+                UserEvent.user_id == user_id
+            )
+        ).scalar_one_or_none()
+        return result

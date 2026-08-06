@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Admin Products — SmartReco AI{% endblock %}
+{% block content %}
+<div class="container-fluid px-4 py-4">
+  <div class="d-flex justify-content-between mb-4">
+    <h4 class="fw-bold mb-0"><i class="bi bi-grid me-2 text-info"></i>Manage Products</h4>
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#productModal" onclick="openCreate()">
+      <i class="bi bi-plus-lg me-1"></i>New Product
+    </button>
+  </div>
+  <div class="card">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead class="table-dark"><tr>
+          <th>Title</th><th>Category</th><th>Difficulty</th><th>Price</th><th>Active</th><th>Actions</th>
+        </tr></thead>
+        <tbody id="products-table"><tr><td colspan="6" class="text-center py-4"><div class="spinner-border text-primary"></div></td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Create/Edit Modal -->
+<div class="modal fade" id="productModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title" id="modal-title">New Product</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input type="hidden" id="edit-id"/>
+        <div class="row g-3">
+          <div class="col-12"><label class="form-label">Title *</label><input type="text" class="form-control" id="p-title"/></div>
+          <div class="col-12"><label class="form-label">Description</label><textarea class="form-control" id="p-desc" rows="3"></textarea></div>
+          <div class="col-md-4"><label class="form-label">Category</label><input type="text" class="form-control" id="p-cat" placeholder="machine-learning"/></div>
+          <div class="col-md-4"><label class="form-label">Difficulty</label>
+            <select class="form-select" id="p-diff"><option value="">—</option><option>beginner</option><option>intermediate</option><option>advanced</option></select></div>
+          <div class="col-md-2"><label class="form-label">Duration (min)</label><input type="number" class="form-control" id="p-dur"/></div>
+          <div class="col-md-2"><label class="form-label">Price ($)</label><input type="number" step="0.01" class="form-control" id="p-price"/></div>
+          <div class="col-12"><label class="form-label">Tags (comma separated)</label><input type="text" class="form-control" id="p-tags" placeholder="python, ml, deep-learning"/></div>
+          <div class="col-12"><div class="form-check"><input type="checkbox" class="form-check-input" id="p-active" checked/><label class="form-check-label" for="p-active">Active</label></div></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" onclick="saveProduct()">
+          <span id="save-spinner" class="spinner-border spinner-border-sm d-none me-1"></span>Save
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+const token = localStorage.getItem('access_token');
+if(!token) window.location='/login';
+
+async function loadProducts(){
+  const r = await fetch('/api/v1/admin/products?limit=100',{headers:{'Authorization':'Bearer '+token}});
+  if(r.status===403){ alert('Admin only'); return; }
+  const d = await r.json();
+  const items = d.items || d;
+  document.getElementById('products-table').innerHTML = items.map(p=>`
+    <tr>
+      <td class="fw-semibold">${p.title}</td>
+      <td>${p.category||'—'}</td>
+      <td>${p.difficulty||'—'}</td>
+      <td>${p.price===null?'Free':'$'+p.price}</td>
+      <td><span class="badge ${p.is_active?'bg-success':'bg-secondary'}">${p.is_active?'Active':'Hidden'}</span></td>
+      <td>
+        <button class="btn btn-sm btn-outline-primary me-1" onclick='openEdit(${JSON.stringify(p)})'><i class="bi bi-pencil"></i></button>
+        <button class="btn btn-sm btn-outline-danger" onclick="deleteProduct('${p.id}')"><i class="bi bi-trash"></i></button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="6" class="text-center text-muted">No products yet.</td></tr>';
+}
+
+function openCreate(){
+  document.getElementById('modal-title').textContent='New Product';
+  document.getElementById('edit-id').value='';
+  ['title','desc','cat','dur','price','tags'].forEach(f=>document.getElementById('p-'+f).value='');
+  document.getElementById('p-diff').value='';
+  document.getElementById('p-active').checked=true;
+}
+
+function openEdit(p){
+  document.getElementById('modal-title').textContent='Edit Product';
+  document.getElementById('edit-id').value=p.id;
+  document.getElementById('p-title').value=p.title||'';
+  document.getElementById('p-desc').value=p.description||'';
+  document.getElementById('p-cat').value=p.category||'';
+  document.getElementById('p-diff').value=p.difficulty||'';
+  document.getElementById('p-dur').value=p.duration||'';
+  document.getElementById('p-price').value=p.price===null?'':p.price;
+  document.getElementById('p-tags').value=(p.tags||[]).join(', ');
+  document.getElementById('p-active').checked=p.is_active;
+  new bootstrap.Modal(document.getElementById('productModal')).show();
+}
+
+async function saveProduct(){
+  const id = document.getElementById('edit-id').value;
+  const spin = document.getElementById('save-spinner');
+  spin.classList.remove('d-none');
+  const body = {
+    title:document.getElementById('p-title').value,
+    description:document.getElementById('p-desc').value||null,
+    category:document.getElementById('p-cat').value||null,
+    difficulty:document.getElementById('p-diff').value||null,
+    duration:parseInt(document.getElementById('p-dur').value)||null,
+    price:parseFloat(document.getElementById('p-price').value)||null,
+    tags:document.getElementById('p-tags').value.split(',').map(t=>t.trim()).filter(Boolean),
+    is_active:document.getElementById('p-active').checked,
+  };
+  const url = id ? `/api/v1/admin/products/${id}` : '/api/v1/admin/products';
+  const method = id ? 'PUT' : 'POST';
+  const r = await fetch(url,{method,headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body)});
+  spin.classList.add('d-none');
+  if(!r.ok){ const e=await r.json(); showToast(e.detail||'Error','danger'); return; }
+  bootstrap.Modal.getInstance(document.getElementById('productModal')).hide();
+  showToast(id?'Product updated!':'Product created!','success');
+  loadProducts();
+}
+
+async function deleteProduct(id){
+  if(!confirm('Delete this product?')) return;
+  const r = await fetch('/api/v1/admin/products/'+id,{method:'DELETE',headers:{'Authorization':'Bearer '+token}});
+  if(!r.ok){ showToast('Delete failed','danger'); return; }
+  showToast('Deleted','success'); loadProducts();
+}
+
+loadProducts();
+</script>
+{% endblock %}

@@ -78,8 +78,34 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ #
     # External services                                                    #
     # ------------------------------------------------------------------ #
+    REDIS_URL: str = Field(default="redis://localhost:6379/0", description="Redis DSN.")
+
     MESH_API_KEY: str = ""
     LANGSMITH_API_KEY: str = ""
+    LANGSMITH_TRACING: bool = Field(
+        default=False,
+        description="Set to true to enable LangSmith trace collection.",
+    )
+    LANGSMITH_PROJECT: str = Field(
+        default="SmartReco-AI",
+        description="LangSmith project name traces are sent to.",
+    )
+
+    # ------------------------------------------------------------------ #
+    # LLM (OpenAI-compatible)                                              #
+    # ------------------------------------------------------------------ #
+    # LLM_API_KEY  : API key for your LLM provider (OpenAI, Together, etc.)
+    # LLM_BASE_URL : Override for OpenAI-compatible endpoints; blank = OpenAI.
+    # LLM_MODEL    : Model used for recommendation generation.
+    LLM_API_KEY: str = Field(default="", description="LLM provider API key.")
+    LLM_BASE_URL: str = Field(
+        default="",
+        description="OpenAI-compatible base URL. Leave blank for OpenAI default.",
+    )
+    LLM_MODEL: str = Field(
+        default="minimax/m2-her",
+        description="Model name for recommendation generation.",
+    )
 
     # Qdrant
     QDRANT_URL: str = "http://localhost:6333"

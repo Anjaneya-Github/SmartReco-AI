@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Course Detail — SmartReco AI{% endblock %}
+{% block content %}
+<div class="container py-4" style="max-width:800px">
+  <a href="/products" class="btn btn-outline-secondary btn-sm mb-3"><i class="bi bi-arrow-left me-1"></i>Back</a>
+  <div id="detail-loading" class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+  <div id="detail-content" class="d-none">
+    <div class="card">
+      <div class="card-body p-4">
+        <div class="d-flex justify-content-between align-items-start mb-3">
+          <h3 class="fw-bold mb-0" id="d-title"></h3>
+          <span class="badge bg-success ms-3" id="d-price"></span>
+        </div>
+        <div class="d-flex flex-wrap gap-2 mb-3" id="d-badges"></div>
+        <p class="text-muted" id="d-desc"></p>
+        <div class="d-flex flex-wrap gap-1 mb-4" id="d-tags"></div>
+        <button class="btn btn-primary" onclick="trackAndEnroll()">
+          <i class="bi bi-play-circle me-2"></i>Enroll Now
+        </button>
+        <button class="btn btn-outline-secondary ms-2" onclick="wishlist()">
+          <i class="bi bi-heart me-2"></i>Wishlist
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+const productId = "{{ product_id }}";
+const token = localStorage.getItem('access_token');
+
+async function loadDetail(){
+  const r = await fetch('/api/v1/products/'+productId,
+    { headers: token ? {'Authorization':'Bearer '+token} : {} });
+  if(!r.ok){ document.getElementById('detail-loading').innerHTML='<p class="text-danger">Product not found.</p>'; return; }
+  const p = await r.json();
+  document.getElementById('d-title').textContent = p.title;
+  document.getElementById('d-price').textContent = (p.price===null||p.price===0) ? 'Free' : '$'+p.price;
+  document.getElementById('d-desc').textContent = p.description || 'No description.';
+  document.getElementById('d-badges').innerHTML = [
+    p.category ? `<span class="badge bg-primary">${p.category}</span>` : '',
+    p.difficulty ? `<span class="badge bg-secondary">${p.difficulty}</span>` : '',
+    p.duration ? `<span class="badge bg-dark">${p.duration} min</span>` : '',
+  ].join('');
+  document.getElementById('d-tags').innerHTML = (p.tags||[]).map(t=>`<span class="badge bg-dark border text-muted">${t}</span>`).join('');
+  document.getElementById('detail-loading').classList.add('d-none');
+  document.getElementById('detail-content').classList.remove('d-none');
+  if(window._tracker) window._tracker.track('view', productId);
+}
+
+function trackAndEnroll(){
+  if(window._tracker) window._tracker.track('click', productId);
+  showToast('Enrolled! Track your progress on the dashboard.','success');
+}
+
+async function wishlist(){
+  if(!token){ showToast('Please login first.','warning'); return; }
+  if(window._tracker) window._tracker.track('wishlist', productId);
+  showToast('Added to wishlist!','success');
+}
+
+loadDetail();
+</script>
+{% endblock %}

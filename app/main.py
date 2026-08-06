@@ -30,6 +30,7 @@ from app.api.v1.router import api_v1_router
 from app.core.config import settings
 from app.core.exceptions import AppException
 from app.core.logging import get_logger, setup_logging
+from app.dashboard.dashboard_router import router as dashboard_router
 from app.database.engine import engine
 from app.middleware.logging import AccessLogMiddleware
 from app.middleware.request_id import RequestIDMiddleware
@@ -61,20 +62,37 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         settings.APP_ENV,
     )
 
-    # Verify the database engine can be imported without errors.
-    # Actual connection attempts happen per-request via get_db().
+    # Wire LangSmith tracing environment variables
+    if settings.LANGSMITH_TRACING and settings.LANGSMITH_API_KEY:
+        import os
+        os.environ["LANGCHAIN_API_KEY"] = settings.LANGSMITH_API_KEY
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        os.environ["LANGCHAIN_PROJECT"] = settings.LANGSMITH_PROJECT
+        logger.info("LangSmith tracing enabled. project=%s", settings.LANGSMITH_PROJECT)
+
     logger.info("Database engine ready  [pool_size=%d]", engine.pool.size())
 
-    # Ensure the Qdrant products collection exists.
     try:
         vector_svc = VectorService(_get_qdrant_client())
         vector_svc.ensure_collection()
     except Exception as exc:
         logger.warning("Qdrant unavailable at startup — will retry on first use. error=%s", exc)
 
+    # Start APScheduler
+    try:
+        from app.scheduler.scheduler import start_scheduler
+        start_scheduler()
+    except Exception as exc:
+        logger.warning("Scheduler failed to start. error=%s", exc)
+
     yield  # ← application is running here
 
     # ---- SHUTDOWN ----
+    try:
+        from app.scheduler.scheduler import stop_scheduler
+        stop_scheduler()
+    except Exception:
+        pass
     logger.info("Shutting down %s — disposing connection pool.", settings.APP_NAME)
     engine.dispose()
     logger.info("Shutdown complete.")
@@ -238,13 +256,21 @@ def _register_routers(app: FastAPI) -> None:
     # ---- Versioned API v1 ----
     app.include_router(api_v1_router, prefix="/api/v1")
 
+    # ---- Dashboard + UI routes ----
+    app.include_router(dashboard_router)
+
 
 def _mount_static(app: FastAPI) -> None:
-    """Mount the static-files directory if it exists."""
+    """Mount static files and templates."""
     import os
-    static_dir = os.path.join(os.path.dirname(__file__), "static")
-    if os.path.isdir(static_dir):
-        app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    # App-level static (JS trackers, CSS)
+    app_static = os.path.join(os.path.dirname(__file__), "static")
+    if os.path.isdir(app_static):
+        app.mount("/static", StaticFiles(directory=app_static), name="static")
+    # Project-root static fallback
+    root_static = os.path.join(os.path.dirname(__file__), "..", "static")
+    if os.path.isdir(root_static) and not os.path.isdir(app_static):
+        app.mount("/static", StaticFiles(directory=root_static), name="static")
 
 
 # ------------------------------------------------------------------ #

@@ -24,6 +24,7 @@ from app.routers.products import router as products_router
 from app.routers.events import router as events_router
 from app.routers.recommendations import router as recommendations_router
 from app.routers.admin import router as admin_router
+from app.routers.users import router as users_router
 
 # Parent router that every feature router attaches to.
 # ``main.py`` mounts this at prefix="/api/v1".
@@ -34,3 +35,4 @@ api_v1_router.include_router(products_router)
 api_v1_router.include_router(events_router)
 api_v1_router.include_router(recommendations_router)
 api_v1_router.include_router(admin_router)
+api_v1_router.include_router(users_router)

@@ -188,6 +188,42 @@ class VectorService:
         )
         logger.debug("Qdrant delete OK. product_id=%s", product_id)
 
+    def search(
+        self,
+        vector: list[float],
+        limit: int = 20,
+        score_threshold: float = 0.0,
+    ) -> list[uuid.UUID]:
+        """
+        Find the *limit* most similar product vectors by cosine similarity.
+
+        Args:
+            vector:          Query embedding (length must equal EMBEDDING_DIMENSION).
+            limit:           Maximum number of results to return.
+            score_threshold: Minimum cosine similarity score (0.0 = no filter).
+
+        Returns:
+            Ordered list of product UUIDs, best-match first.
+            Returns an empty list if the collection is empty.
+        """
+        try:
+            results = self._client.search(
+                collection_name=self._collection,
+                query_vector=vector,
+                limit=limit,
+                score_threshold=score_threshold if score_threshold > 0.0 else None,
+                with_payload=False,   # we only need the IDs
+                with_vectors=False,
+            )
+            ids = [uuid.UUID(str(hit.id)) for hit in results]
+            logger.debug(
+                "Qdrant search returned %d results. limit=%d", len(ids), limit
+            )
+            return ids
+        except Exception as exc:
+            logger.warning("Qdrant search failed. error=%s", exc)
+            return []
+
 
 # ------------------------------------------------------------------ #
 # FastAPI dependency                                                  #
