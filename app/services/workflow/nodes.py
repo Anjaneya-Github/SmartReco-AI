@@ -178,6 +178,12 @@ def build_query(state: RecommendationState, deps: WorkflowDeps) -> dict:
         parts.append(f"level: {level}")
 
     query = " | ".join(parts) if parts else "learning courses"
+
+    # Sanitize the query before it's used in vector search or an LLM prompt.
+    # This strips HTML, removes control characters, and normalises whitespace.
+    from app.security.prompt_sanitizer import PromptSanitizer
+    query = PromptSanitizer.sanitize(query, max_length=500)
+
     logger.debug("workflow:build_query query=%r", query)
 
     return {"retrieval_query": query, "retrieval_attempts": 0}
@@ -354,6 +360,18 @@ def generate_recommendation(
         products=products_text,
     )
 
+    # ── Guardrail 1: Prompt injection check ──────────────────────────
+    # Scan the assembled prompt for injection patterns before sending
+    # to the LLM. This protects against poisoned product descriptions
+    # or search queries that try to hijack the model's behaviour.
+    from app.security.prompt_guard import PromptGuard
+    safe, reason = PromptGuard.check(user_prompt)
+    if not safe:
+        logger.warning(
+            "workflow:generate_recommendation prompt blocked by PromptGuard. reason=%s", reason
+        )
+        return {"error": f"prompt_blocked:{reason}"}
+
     logger.info(
         "workflow:generate_recommendation calling LLM. model=%s candidates=%d",
         settings.LLM_MODEL,
@@ -393,17 +411,25 @@ def validate_products(
     state: RecommendationState, deps: WorkflowDeps
 ) -> dict:
     """
-    Node 7 — Parse the LLM JSON and strip any hallucinated product IDs.
+    Node 7 — Parse the LLM JSON output and validate it through OutputGuard.
 
-    This is the safety gate: the LLM is instructed never to invent IDs,
-    but we verify every ID against the ``candidates`` dict anyway.
+    Two guardrails run here:
+    1. JSON parsing   — strip markdown fences, handle parse failures gracefully.
+    2. OutputGuard    — strip hallucinated product IDs, deduplicate, clamp
+                        confidence to [0.0, 1.0], enforce max 5 products.
+
+    Falls back to the top-N candidates when the LLM returns nothing valid,
+    with a reduced confidence score to signal the fallback.
 
     Returns:
         ``{"parsed": <dict>}`` with validated product list and confidence.
     """
-    raw: str          = state.get("llm_raw") or ""
-    candidates: dict  = state.get("candidates") or {}
+    from app.security.output_guard import OutputGuard
 
+    raw: str         = state.get("llm_raw") or ""
+    candidates: dict = state.get("candidates") or {}
+
+    # ── Step 1: Parse JSON ─────────────────────────────────────────────
     # Strip markdown fences if the model added them despite instructions
     cleaned = raw.strip()
     if cleaned.startswith("```"):
@@ -419,50 +445,47 @@ def validate_products(
             "workflow:validate_products JSON parse failed. raw=%r error=%s",
             raw[:300], exc,
         )
-        # Fall back to top-N from candidates list
-        data = {}
+        data = {}  # OutputGuard will handle the empty/invalid result below
 
-    # Validate and filter product IDs
-    valid: list[dict] = []
-    for item in data.get("recommended_products") or []:
-        if not isinstance(item, dict):
-            continue
-        pid = str(item.get("product_id", ""))
-        if pid in candidates:
-            valid.append({
-                "product_id": pid,
-                "title": item.get("title") or candidates[pid].get("title", ""),
-            })
-        else:
-            logger.warning(
-                "workflow:validate_products hallucinated product_id=%r — dropped", pid
-            )
+    # Assemble title fallbacks from candidates for products the LLM listed
+    # without a title (unlikely but defensive)
+    reco_products = data.get("recommended_products") or []
+    for item in reco_products:
+        if isinstance(item, dict) and not item.get("title"):
+            pid = str(item.get("product_id", ""))
+            if pid in candidates:
+                item["title"] = candidates[pid].get("title", "")
 
-    # If LLM hallucinated every ID, fall back to top candidates
-    if not valid and candidates:
+    # ── Step 2: OutputGuard ────────────────────────────────────────────
+    # Validates: confidence range, no duplicate IDs, no hallucinated IDs,
+    # max 5 products.  The valid_product_ids set is the authoritative list
+    # of IDs that exist in our candidate pool — LLM cannot invent new ones.
+    valid_ids = set(candidates.keys())
+    ok, reason, data = OutputGuard.validate(data, valid_product_ids=valid_ids)
+
+    if not ok:
         logger.warning(
-            "workflow:validate_products no valid IDs from LLM — using top candidates"
+            "workflow:validate_products OutputGuard rejected output. reason=%s", reason
         )
-        valid = [
+        # Graceful fallback: pick top-N from candidates with low confidence
+        data["recommended_products"] = [
             {"product_id": pid, "title": p.get("title", "")}
             for pid, p in list(candidates.items())[:5]
         ]
+        data["confidence"] = min(float(data.get("confidence", 0.5)), 0.3)
 
-    try:
-        confidence = float(data.get("confidence", 0.5))
-    except (TypeError, ValueError):
-        confidence = 0.5
-    confidence = round(max(0.0, min(1.0, confidence)), 4)
+    valid  = data.get("recommended_products", [])
+    confidence = round(float(data.get("confidence", 0.5)), 4)
 
-    # Penalise if we had to fall back
-    if not data.get("recommended_products"):
+    # Extra penalty if the JSON was completely unparseable
+    if not reco_products:
         confidence = min(confidence, 0.3)
 
     parsed = {
-        "summary":               str(data.get("summary", ""))[:2000],
-        "reasoning":             str(data.get("reasoning", ""))[:2000],
-        "recommended_products":  valid[:5],
-        "confidence":            confidence,
+        "summary":              str(data.get("summary",   ""))[:2000],
+        "reasoning":            str(data.get("reasoning", ""))[:2000],
+        "recommended_products": valid[:5],
+        "confidence":           confidence,
     }
 
     logger.info(
