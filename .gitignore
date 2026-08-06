@@ -52,7 +52,6 @@ desktop.ini
 logs/
 
 # ── Internal dev notes (not for public repo) ─────────────────────
-docs/challenges.md
 docs/design.md
 docs/testing.md
 scripts/email_preview.html
