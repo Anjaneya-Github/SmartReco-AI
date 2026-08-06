@@ -107,6 +107,16 @@ class Settings(BaseSettings):
         description="Model name for recommendation generation.",
     )
 
+    # ------------------------------------------------------------------ #
+    # Email (SMTP)                                                         #
+    # ------------------------------------------------------------------ #
+    EMAIL_ENABLED:   bool = Field(default=False, description="Enable email notifications.")
+    SMTP_HOST:       str  = Field(default="",    description="SMTP server host.")
+    SMTP_PORT:       int  = Field(default=587,   description="SMTP server port.")
+    SMTP_USER:       str  = Field(default="",    description="SMTP login username.")
+    SMTP_PASSWORD:   str  = Field(default="",    description="SMTP login password.")
+    EMAIL_FROM:      str  = Field(default="",    description="From address e.g. 'SmartReco AI <you@gmail.com>'.")
+
     # Qdrant
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_API_KEY: str = ""

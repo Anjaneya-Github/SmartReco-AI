@@ -645,17 +645,32 @@ APScheduler runs three background jobs, registered during FastAPI startup:
 
 | Job | Schedule | Description |
 |---|---|---|
-| `daily_recommendation_refresh` | 06:00 UTC daily | Generate recommendations for active users who haven't had one in 23 hours |
-| `cache_cleanup` | Every hour | Log Redis memory stats (Redis handles TTL expiry natively) |
-| `event_cleanup` | 03:00 UTC daily | Log count of events older than 90 days (archive candidates) |
+| `daily_recommendation_refresh` | **08:00 UTC** daily | Generate recommendations for active users who haven't had one in 23 hours; invalidates dashboard cache per user |
+| `cache_cleanup` | **Every hour** | Log Redis memory stats and key count (TTL expiry handled natively by Redis) |
+| `event_cleanup` | **02:00 UTC** daily | Delete `UserEvent` records older than 90 days to keep the table lean |
 
 The scheduler starts automatically with the application and stops gracefully on shutdown.
 
-```python
-# app/scheduler/scheduler.py
-start_scheduler()   # called in FastAPI lifespan startup
-stop_scheduler()    # called in FastAPI lifespan shutdown
+### Admin Endpoints
+
+```bash
+# Run a job immediately (synchronous)
+POST /api/v1/admin/scheduler/run
+Authorization: Bearer <admin-token>
+{ "job_id": "daily_reco_refresh" }   # or cache_cleanup | event_cleanup
+
+# Get scheduler status and per-job metadata
+GET /api/v1/admin/scheduler/status
+Authorization: Bearer <admin-token>
 ```
+
+Status response includes per job:
+- `next_run_time` — next scheduled execution (ISO 8601 UTC)
+- `last_run` — last execution timestamp
+- `last_status` — `success` / `error` / `never` / `skipped_no_redis`
+- `last_duration_s` — wall-clock time in seconds
+- `recommendations_generated` — count (daily job only)
+- `events_archived` — count (cleanup job only)
 
 ---
 
@@ -728,6 +743,13 @@ Each trace captures the full LangGraph execution including:
 |---|---|---|---|
 | `GET` | `/api/v1/dashboard` | User | Full dashboard (read-only, cache-first) |
 | `GET` | `/api/v1/dashboard/analytics` | Admin | Platform-wide analytics |
+
+### Scheduler
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/api/v1/admin/scheduler/run` | Admin | Run a job immediately (sync) |
+| `GET` | `/api/v1/admin/scheduler/status` | Admin | Scheduler running state + per-job stats |
 
 ### Users & Health
 
@@ -812,45 +834,69 @@ This section documents every step taken to build SmartReco AI from scratch.
 - `POST /recommendations/{id}/feedback` — converts liked/disliked to behavioral event
 - `GET /dashboard/analytics` — admin-only: users, products, events, recs, top categories, top searches
 - `PromptGuard`, `PromptSanitizer`, `OutputGuard` — lightweight guardrail pipeline
-- APScheduler: daily recommendation refresh (6 AM UTC), hourly cache stats, daily event cleanup (3 AM UTC)
+- APScheduler jobs: `daily_reco_refresh` (08:00 UTC), `cache_cleanup` (hourly), `event_cleanup` (02:00 UTC)
+- Admin scheduler endpoints: `POST /admin/scheduler/run`, `GET /admin/scheduler/status`
+- Job stats registry (`_job_stats`) tracks last run, status, duration, and generated counts per job
 - Templates: `base.html`, `login.html`, `dashboard.html`, `products.html`, `product_detail.html`, `admin/dashboard.html`, `admin/products.html`
 - JS: `tracker.js` (batch event sender), `dashboard.js` (data renderer), `feedback.js`
 - Fixed Starlette 1.4.1 `TemplateResponse` signature: `(request, name, context)` not `(name, {"request": req})`
 - Fixed missing DB migrations: `alembic upgrade head` applied `user_events` + `recommendations` tables
+- Fixed Redis blocking: `CacheClient` now uses `lru_cache` to avoid repeated timeouts
 - Seeded 20 AI/ML courses via `scripts/seed_products.py`
 - Seeded user behavioral events + triggered first recommendation via `scripts/seed_user_events.py`
+
+### Step 11 — Bug Fixes & Polish
+- Fixed login page flickering: async token validation before redirect, `location.replace()` to prevent history loop, excluded `tracker.js` from login page
+- Fixed `EventResponse` schema: added `validation_alias="event_metadata"` to map renamed ORM attribute
+- Fixed scheduler card hidden inside conditional `#analytics-content` div — moved outside as always-visible section
+- Added admin user picker dropdown (`GET /api/v1/admin/users`) — no more manual UUID typing
+- Added `EmailService` with SMTP-based recommendation digest and welcome emails (graceful no-op if not configured)
+- Added `scripts/preview_email.py` to generate and open email HTML preview locally
+- Added `scripts/final_test.py` — 66-check comprehensive end-to-end test suite
+- All 66/66 checks passing
 
 ---
 
 ## 22. Future Enhancements
 
-> 📋 **Full enhancement roadmap with priorities and effort estimates:** [`docs/FEATURE_ENHANCEMENTS.md`](docs/FEATURE_ENHANCEMENTS.md)
+> 📋 **Full enhancement roadmap:** [`docs/feature_enhancements.md`](docs/feature_enhancements.md)
 
-| Feature | Description |
+| Feature | Priority |
 |---|---|
-| **Async workers** | Move recommendation generation to Celery/ARQ background tasks |
-| **Real-time updates** | WebSocket push when a new recommendation is generated |
-| **Collaborative filtering** | Matrix factorisation for user-user and item-item similarity |
-| **A/B testing** | Multiple recommendation strategies with statistical comparison |
-| **Email notifications** | Notify users when fresh recommendations are available |
-| **Multi-language** | Multilingual embedding model for non-English catalogues |
-| **Model fine-tuning** | Fine-tune the LLM on domain-specific recommendation patterns |
-| **PATCH endpoints** | Partial product updates (currently full PUT only) |
-| **Rate limiting** | Per-user API rate limits with Redis sliding windows |
-| **Export** | CSV / JSON export of recommendation history for analytics |
+| Async background task queue — remove LLM latency from HTTP path | 1 — High |
+| Recommendation quality gate — skip low-confidence fallback rows | 1 — High |
+| WebSocket / SSE real-time dashboard push | 1 — Medium |
+| Collaborative filtering ("users like you also studied") | 2 — Very High |
+| Feedback loop re-weighting for future retrievals | 2 — High |
+| Semantic search on product catalogue | 3 — High |
+| User onboarding questionnaire | 3 — High |
+| Prometheus metrics at `/metrics` | 4 — Medium |
+| LLM fine-tuning on validated recommendation pairs | 5 — Very High |
+
+---
+
+## Docs
+
+| Document | Description |
+|---|---|
+| [`docs/architecture.md`](docs/architecture.md) | Full system architecture diagrams, LangGraph workflow, data flow, cache architecture |
+| [`docs/challenges.md`](docs/challenges.md) | 15 real challenges encountered and how each was solved |
+| [`docs/feature_enhancements.md`](docs/feature_enhancements.md) | What's built, what's partial, full roadmap with priority table |
 
 ---
 
 ## Screenshots
 
-> _Add screenshots here after deployment_
+> See `docs/screenshots/` for actual screenshots taken during development.
 
-| Screen | Description |
+| File | Description |
 |---|---|
-| `[Dashboard]` | User AI dashboard with recommendation story and course grid |
-| `[Login]` | Login and registration page |
-| `[Products]` | Course catalogue with category filters |
-| `[Admin]` | Admin analytics and recommendation trigger |
+| `docs/screenshots/dashboard.png` | User AI dashboard with recommendation story |
+| `docs/screenshots/products.png` | Course catalogue grid |
+| `docs/screenshots/mesh_api.png` | Mesh API smoke test output |
+| `docs/screenshots/ls_observability.png` | LangSmith trace dashboard |
+| `docs/screenshots/docker.png` | Docker containers running |
+| `docs/screenshots/Swagger UI.png` | Full Swagger UI with all 23 endpoints |
 
 ---
 
@@ -860,4 +906,4 @@ MIT © 2026 SmartReco AI
 
 ---
 
-*Built with ❤️ using FastAPI · LangGraph · Mesh API · PostgreSQL · Qdrant · Redis*
+*Built with ❤️ using FastAPI · LangGraph · Mesh API · PostgreSQL · Qdrant · Redis · APScheduler · LangSmith*

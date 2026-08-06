@@ -2,30 +2,34 @@
 {% block title %}Admin Dashboard — SmartReco AI{% endblock %}
 {% block content %}
 <div class="container-fluid px-4 py-4">
+
   <div class="d-flex justify-content-between align-items-center mb-4">
     <h4 class="fw-bold mb-0"><i class="bi bi-shield-check me-2 text-warning"></i>Admin Dashboard</h4>
-    <a href="/admin/products" class="btn btn-outline-primary btn-sm"><i class="bi bi-plus-circle me-1"></i>Manage Products</a>
+    <a href="/admin/products" class="btn btn-outline-primary btn-sm">
+      <i class="bi bi-plus-circle me-1"></i>Manage Products
+    </a>
   </div>
-  <div id="analytics-loading" class="text-center py-4"><div class="spinner-border text-warning"></div></div>
+
+  <!-- ── Analytics section (hidden until loaded) ────────────── -->
+  <div id="analytics-loading" class="text-center py-4">
+    <div class="spinner-border text-warning"></div>
+  </div>
+
   <div id="analytics-content" class="d-none">
-    <!-- Stat cards -->
     <div class="row g-3 mb-4" id="stat-cards"></div>
-    <div class="row g-4">
-      <!-- Top Categories -->
+    <div class="row g-4 mb-4">
       <div class="col-md-4">
         <div class="card h-100">
           <div class="card-header fw-semibold"><i class="bi bi-bar-chart me-2 text-info"></i>Top Categories</div>
           <ul class="list-group list-group-flush" id="cat-list"></ul>
         </div>
       </div>
-      <!-- Top Searches -->
       <div class="col-md-4">
         <div class="card h-100">
           <div class="card-header fw-semibold"><i class="bi bi-search me-2 text-primary"></i>Top Searches</div>
           <ul class="list-group list-group-flush" id="search-list"></ul>
         </div>
       </div>
-      <!-- Most Viewed -->
       <div class="col-md-4">
         <div class="card h-100">
           <div class="card-header fw-semibold"><i class="bi bi-eye me-2 text-success"></i>Most Viewed Products</div>
@@ -34,39 +38,104 @@
       </div>
     </div>
     <!-- Generate Recommendation -->
-    <div class="card mt-4">
+    <div class="card mb-4">
       <div class="card-header fw-semibold"><i class="bi bi-stars me-2 text-warning"></i>Generate Recommendation</div>
-      <div class="card-body d-flex gap-3">
-        <input type="text" id="gen-user-id" class="form-control" placeholder="User UUID" style="max-width:400px"/>
-        <button class="btn btn-warning" onclick="generateReco()">
-          <span id="gen-spinner" class="spinner-border spinner-border-sm d-none me-1"></span>
-          <i class="bi bi-cpu me-1"></i>Run AI Workflow
+      <div class="card-body">
+        <div class="row g-3 align-items-end">
+          <div class="col-md-5">
+            <label class="form-label small text-muted mb-1">Select User</label>
+            <select class="form-select" id="gen-user-select" onchange="document.getElementById('gen-user-id').value=this.value">
+              <option value="">-- pick a user --</option>
+            </select>
+          </div>
+          <div class="col-md-5">
+            <label class="form-label small text-muted mb-1">Or paste User UUID directly</label>
+            <input type="text" id="gen-user-id" class="form-control font-monospace"
+                   placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                   oninput="document.getElementById('gen-user-select').value=''"/>
+          </div>
+          <div class="col-md-2">
+            <button class="btn btn-warning w-100" onclick="generateReco()">
+              <span id="gen-spinner" class="spinner-border spinner-border-sm d-none me-1"></span>
+              <i class="bi bi-cpu me-1"></i>Run AI
+            </button>
+          </div>
+        </div>
+      </div>
+      <div id="gen-result" class="card-footer d-none small text-success fw-semibold"></div>
+    </div>
+  </div><!-- /#analytics-content -->
+
+  <!-- ══════════════════════════════════════════════════════════
+       SCHEDULER CARD — always visible, independent of analytics
+       ══════════════════════════════════════════════════════════ -->
+  <div class="card mb-4" id="scheduler-card">
+    <div class="card-header d-flex align-items-center justify-content-between">
+      <span class="fw-semibold">
+        <i class="bi bi-clock-history me-2 text-info"></i>APScheduler — Background Jobs
+      </span>
+      <div class="d-flex align-items-center gap-2">
+        <span class="badge bg-secondary" id="sched-status-badge">Loading…</span>
+        <button class="btn btn-outline-secondary btn-sm" onclick="loadScheduler()">
+          <i class="bi bi-arrow-clockwise"></i> Refresh
         </button>
       </div>
-      <div id="gen-result" class="card-footer d-none small text-success"></div>
     </div>
+
+    <div class="card-body p-0">
+      <div id="sched-loading" class="text-center py-3">
+        <div class="spinner-border spinner-border-sm text-info"></div>
+        <span class="ms-2 text-muted small">Loading scheduler status…</span>
+      </div>
+      <div id="sched-jobs" class="d-none">
+        <div class="table-responsive">
+          <table class="table table-sm table-hover mb-0">
+            <thead class="table-dark">
+              <tr>
+                <th>Job</th><th>Schedule</th><th>Next Run</th>
+                <th>Last Run</th><th>Status</th><th>Duration</th>
+                <th>Details</th><th class="text-center">Action</th>
+              </tr>
+            </thead>
+            <tbody id="sched-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div id="sched-error" class="d-none px-3 py-2 text-danger small"></div>
+    </div>
+
+    <div id="sched-run-result" class="card-footer d-none small py-2"></div>
   </div>
-</div>
+
+</div><!-- /.container-fluid -->
 {% endblock %}
+
 {% block extra_scripts %}
 <script>
 const token = localStorage.getItem('access_token');
-if(!token) window.location='/login';
+if (!token) window.location.replace('/login');
 
-async function loadAnalytics(){
-  const r = await fetch('/api/v1/dashboard/analytics',{headers:{'Authorization':'Bearer '+token}});
-  if(r.status===403){ document.getElementById('analytics-loading').innerHTML='<p class="text-danger">Admin access required.</p>'; return; }
+// ── Analytics ────────────────────────────────────────────────────────
+async function loadAnalytics() {
+  const r = await fetch('/api/v1/dashboard/analytics', {
+    headers: { 'Authorization': 'Bearer ' + token }
+  });
+  if (r.status === 403) {
+    document.getElementById('analytics-loading').innerHTML =
+      '<p class="text-danger">Admin access required.</p>';
+    return;
+  }
   const d = await r.json();
   document.getElementById('analytics-loading').classList.add('d-none');
   document.getElementById('analytics-content').classList.remove('d-none');
 
   const stats = [
-    {label:'Users', value:d.total_users, icon:'bi-people', color:'primary'},
-    {label:'Products', value:d.total_products, icon:'bi-grid', color:'info'},
-    {label:'Events', value:d.total_events, icon:'bi-activity', color:'success'},
-    {label:'Recommendations', value:d.total_recommendations, icon:'bi-stars', color:'warning'},
+    { label: 'Users',           value: d.total_users,           icon: 'bi-people',   color: 'primary' },
+    { label: 'Products',        value: d.total_products,         icon: 'bi-grid',     color: 'info'    },
+    { label: 'Events',          value: d.total_events,           icon: 'bi-activity', color: 'success' },
+    { label: 'Recommendations', value: d.total_recommendations,  icon: 'bi-stars',    color: 'warning' },
   ];
-  document.getElementById('stat-cards').innerHTML = stats.map(s=>`
+  document.getElementById('stat-cards').innerHTML = stats.map(s => `
     <div class="col-6 col-md-3">
       <div class="card stat-card text-center p-3">
         <i class="bi ${s.icon} text-${s.color} fs-3 mb-1"></i>
@@ -75,36 +144,194 @@ async function loadAnalytics(){
       </div>
     </div>`).join('');
 
-  const listHtml = (items, keyLabel, countKey) =>
-    items.length ? items.map(i=>`<li class="list-group-item d-flex justify-content-between">
-      <span class="small">${i[keyLabel]||'—'}</span><span class="badge bg-secondary">${i[countKey]}</span></li>`).join('')
-    : '<li class="list-group-item text-muted small">No data yet.</li>';
+  const listHtml = (items, kLabel, kCount) =>
+    items.length
+      ? items.map(i => `<li class="list-group-item d-flex justify-content-between">
+          <span class="small">${i[kLabel] || '—'}</span>
+          <span class="badge bg-secondary">${i[kCount]}</span>
+        </li>`).join('')
+      : '<li class="list-group-item text-muted small">No data yet.</li>';
 
-  document.getElementById('cat-list').innerHTML = listHtml(d.top_categories,'category','count');
-  document.getElementById('search-list').innerHTML = listHtml(d.top_searches,'query','count');
-  document.getElementById('viewed-list').innerHTML = listHtml(d.most_viewed_products,'title','count');
+  document.getElementById('cat-list').innerHTML    = listHtml(d.top_categories,       'category', 'count');
+  document.getElementById('search-list').innerHTML = listHtml(d.top_searches,         'query',    'count');
+  document.getElementById('viewed-list').innerHTML = listHtml(d.most_viewed_products, 'title',    'count');
 }
 
-async function generateReco(){
+// ── Generate recommendation ──────────────────────────────────────────
+async function generateReco() {
   const uid = document.getElementById('gen-user-id').value.trim();
-  if(!uid){ showToast('Enter a user UUID','warning'); return; }
-  const btn = document.querySelector('[onclick="generateReco()"]');
+  if (!uid) { showToast('Enter a user UUID', 'warning'); return; }
+  const btn  = document.querySelector('[onclick="generateReco()"]');
   const spin = document.getElementById('gen-spinner');
-  btn.disabled=true; spin.classList.remove('d-none');
-  try{
-    const r = await fetch('/api/v1/recommendations/generate',{
-      method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
-      body:JSON.stringify({user_id:uid,max_products:20})});
+  btn.disabled = true; spin.classList.remove('d-none');
+  try {
+    const r = await fetch('/api/v1/recommendations/generate', {
+      method:  'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ user_id: uid, max_products: 20 }),
+    });
     const d = await r.json();
-    if(!r.ok) throw new Error(d.detail||'Failed');
+    if (!r.ok) throw new Error(d.detail || 'Failed');
     const res = document.getElementById('gen-result');
-    res.textContent = `✓ Generated! Confidence: ${(d.confidence_score||d.confidence||0).toFixed(2)} · Products: ${(d.recommended_products||[]).length}`;
+    const conf = (d.confidence_score || d.confidence || 0).toFixed(2);
+    const prod = (d.recommended_products || []).length;
+    res.textContent = `Recommendation generated!  Confidence: ${conf}  ·  Products: ${prod}`;
     res.classList.remove('d-none');
-    showToast('Recommendation generated!','success');
-  }catch(e){ showToast(e.message,'danger'); }
-  finally{ btn.disabled=false; spin.classList.add('d-none'); }
+    showToast('Recommendation generated!', 'success');
+    loadScheduler();   // refresh to show updated last-run stats
+  } catch(e) {
+    showToast(e.message, 'danger');
+  } finally {
+    btn.disabled = false; spin.classList.add('d-none');
+  }
+}
+
+// ── Scheduler ────────────────────────────────────────────────────────
+const _JOB_SCHEDULES = {
+  daily_reco_refresh: '08:00 UTC daily',
+  cache_cleanup:      'Every hour',
+  event_cleanup:      '02:00 UTC daily',
+};
+
+const STATUS_COLORS = {
+  success:          'success',
+  error:            'danger',
+  fatal_error:      'danger',
+  never:            'secondary',
+  skipped_no_redis: 'warning',
+  triggered:        'info',
+};
+
+function fmtTime(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'medium' });
+}
+
+function fmtDur(sec) {
+  if (sec == null) return '—';
+  return sec < 1 ? `${(sec * 1000).toFixed(0)} ms` : `${sec.toFixed(2)} s`;
+}
+
+function jobDetail(job) {
+  if (job.id === 'daily_reco_refresh' && job.recommendations_generated != null)
+    return `${job.recommendations_generated} generated`;
+  if (job.id === 'event_cleanup' && job.events_archived != null)
+    return `${job.events_archived} archived`;
+  if (job.id === 'cache_cleanup' && job.keys_found != null)
+    return `${job.keys_found} Redis keys`;
+  return '—';
+}
+
+async function loadScheduler() {
+  const loadEl  = document.getElementById('sched-loading');
+  const jobsEl  = document.getElementById('sched-jobs');
+  const errorEl = document.getElementById('sched-error');
+  const badge   = document.getElementById('sched-status-badge');
+
+  loadEl.classList.remove('d-none');
+  jobsEl.classList.add('d-none');
+  errorEl.classList.add('d-none');
+
+  try {
+    const r = await fetch('/api/v1/admin/scheduler/status', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+
+    if (r.status === 401) { window.location.replace('/login'); return; }
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+
+    const d = await r.json();
+
+    badge.textContent = d.scheduler_running ? 'Running' : 'Stopped';
+    badge.className   = 'badge bg-' + (d.scheduler_running ? 'success' : 'danger');
+
+    document.getElementById('sched-tbody').innerHTML = (d.jobs || []).map(job => {
+      const statusColor = STATUS_COLORS[job.last_status] || 'secondary';
+      const schedule    = _JOB_SCHEDULES[job.id] || '—';
+      return `
+        <tr>
+          <td class="fw-semibold small">${job.name}</td>
+          <td class="small text-muted">${schedule}</td>
+          <td class="small text-info">${fmtTime(job.next_run_time)}</td>
+          <td class="small text-muted">${fmtTime(job.last_run)}</td>
+          <td><span class="badge bg-${statusColor}">${job.last_status || 'never'}</span></td>
+          <td class="small">${fmtDur(job.last_duration_s)}</td>
+          <td class="small text-muted">${jobDetail(job)}</td>
+          <td class="text-center">
+            <button class="btn btn-outline-primary btn-sm" onclick="runJob('${job.id}', this)">
+              <i class="bi bi-play-fill me-1"></i>Run Now
+            </button>
+          </td>
+        </tr>`;
+    }).join('');
+
+    loadEl.classList.add('d-none');
+    jobsEl.classList.remove('d-none');
+
+  } catch (e) {
+    loadEl.classList.add('d-none');
+    errorEl.textContent = 'Could not load scheduler status: ' + e.message;
+    errorEl.classList.remove('d-none');
+  }
+}
+
+async function runJob(jobId, btn) {
+  btn.disabled  = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Running…';
+
+  const resultEl = document.getElementById('sched-run-result');
+  resultEl.className = 'card-footer small py-2 text-muted';
+  resultEl.classList.remove('d-none');
+  resultEl.innerHTML = `<i class="bi bi-hourglass-split me-1"></i>Running <strong>${jobId}</strong>…`;
+
+  try {
+    const r = await fetch('/api/v1/admin/scheduler/run', {
+      method:  'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ job_id: jobId }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Failed');
+
+    const isOk = d.status === 'triggered';
+    resultEl.className = 'card-footer small py-2 ' + (isOk ? 'text-success' : 'text-warning');
+    resultEl.innerHTML =
+      `<i class="bi bi-${isOk ? 'check-circle' : 'exclamation-triangle'} me-1"></i>
+       <strong>${d.name || jobId}</strong> &nbsp;—&nbsp; status: <strong>${d.status}</strong>
+       &nbsp;·&nbsp; at ${fmtTime(d.triggered_at)}`;
+
+    showToast(`Job "${d.name || jobId}" executed`, isOk ? 'success' : 'warning');
+    setTimeout(loadScheduler, 500);
+
+  } catch (e) {
+    resultEl.className = 'card-footer small py-2 text-danger';
+    resultEl.innerHTML = `<i class="bi bi-x-circle me-1"></i>${e.message}`;
+    showToast(e.message, 'danger');
+  } finally {
+    btn.disabled  = false;
+    btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Run Now';
+  }
+}
+
+// ── Init ─────────────────────────────────────────────────────────────
+async function loadUsers() {
+  try {
+    const r = await fetch('/api/v1/admin/users', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (!r.ok) return;
+    const d = await r.json();
+    const sel = document.getElementById('gen-user-select');
+    sel.innerHTML = '<option value="">-- pick a user --</option>' +
+      d.users.map(u => {
+        const label = (u.full_name || u.email) + ' (' + u.role + ')';
+        return `<option value="${u.id}">${label} — ${u.email}</option>`;
+      }).join('');
+  } catch(_) {}
 }
 
 loadAnalytics();
+loadScheduler();
+loadUsers();
 </script>
 {% endblock %}

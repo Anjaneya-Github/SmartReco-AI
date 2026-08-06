@@ -50,3 +50,7 @@ desktop.ini
 # ── Logs ──────────────────────────────────────────────────────────
 *.log
 logs/
+
+# ── Internal dev notes (not for public repo) ─────────────────────
+docs/challenges.md
+scripts/email_preview.html

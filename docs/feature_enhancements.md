@@ -1,349 +1,229 @@
-# SmartReco AI — Feature Enhancement Roadmap
+# SmartReco AI — Feature Enhancements
 
-> Prioritised ideas for taking SmartReco AI from hackathon to production-grade platform.
-
----
-
-## Priority 1 — Production Readiness
-
-### 1.1 Async Background Task Queue
-**Current**: Recommendation generation runs synchronously inside the `/events/batch` HTTP request — LLM latency (2–10s) blocks the response.
-
-**Enhancement**: Move generation to an async worker queue (Celery + Redis Broker, or ARQ, or FastAPI's `BackgroundTasks`).
-
-```
-POST /events/batch
-    ├─ persist events (fast, <50ms)
-    ├─ evaluate trigger (fast, <10ms)
-    └─ push user_id to task queue  ──► worker picks up asynchronously
-Return 202 immediately
-
-Worker:
-    └─ RecommendationService.generate(user_id)
-    └─ Optionally: WebSocket push to client
-```
-
-**Impact**: API latency drops from 2–10s to <100ms on every event batch.
+> What was built, what was added during development, and what remains on the roadmap.
 
 ---
 
-### 1.2 WebSocket / Server-Sent Events for Real-Time Dashboard
-**Current**: Dashboard data is static — user must refresh to see new recommendations.
+## Status Legend
 
-**Enhancement**: After a recommendation is generated, push an SSE event to the user's open browser tab.
-
-```python
-# FastAPI SSE endpoint
-@router.get("/api/v1/dashboard/stream")
-async def dashboard_stream(request: Request, current_user=Depends(get_current_user)):
-    async def event_generator():
-        while True:
-            if await recommendation_ready(current_user.id):
-                yield {"event": "recommendation_ready", "data": "reload"}
-            await asyncio.sleep(3)
-    return EventSourceResponse(event_generator())
-```
-
----
-
-### 1.3 Rate Limiting
-**Current**: No per-user API limits.
-
-**Enhancement**: Sliding window rate limits using Redis:
-
-| Endpoint | Limit |
+| Symbol | Meaning |
 |---|---|
-| `POST /events/batch` | 100 req/min per user |
-| `POST /auth/register` | 5 req/hour per IP |
-| `POST /recommendations/generate` | 10 req/hour per admin |
+| ✅ | Implemented and tested |
+| 🔶 | Partially implemented |
+| 🔲 | Planned / future enhancement |
+
+---
+
+## COMPLETED FEATURES (Built During Hackathon)
+
+### ✅ Core Platform
+| Feature | Notes |
+|---|---|
+| FastAPI REST API | 23 endpoints, full OpenAPI spec |
+| JWT Authentication + RBAC | user / admin roles, bcrypt, token refresh |
+| PostgreSQL via SQLAlchemy 2.0 | 4 tables, Alembic migrations |
+| Qdrant Vector Store | 384-dim embeddings, HNSW, dual-write pattern |
+| Redis Caching | behavior (10m), recommendation (30m), dashboard (5m); graceful no-op if unavailable |
+| Product CRUD | admin-only, PostgreSQL + Qdrant atomic dual-write |
+| Behavioral Event Tracking | 8 event types, batch ingest up to 500, JSONB metadata |
+| Behavior Intelligence Layer | InterestExtractor, EngagementScorer, BehaviorAnalyzer — pure Python, DB-free |
+
+### ✅ AI Recommendation Engine
+| Feature | Notes |
+|---|---|
+| LangGraph Workflow | 8 nodes, retrieval quality loop with conditional edges, up to 2 refinement attempts |
+| Mesh API Integration | `minimax/m2-her` free model, 32k context, OpenAI-compatible via `base_url` |
+| LangSmith Tracing | Auto-captured via `LANGCHAIN_TRACING_V2=true` on every graph run |
+| Recommendation Trigger | 4 rules: ≥20 events, repeated search, purchase/wishlist, 10-min inactivity |
+| AI Guardrails | PromptGuard (injection detection), PromptSanitizer (HTML strip, truncate), OutputGuard (dedup, ID validation, confidence clamp) |
+| Recommendation Persistence | Immutable rows in PostgreSQL, dashboard reads latest |
+
+### ✅ Dashboard & UI
+| Feature | Notes |
+|---|---|
+| User Dashboard API | `GET /api/v1/dashboard` — read-only, cache-first, never regenerates |
+| Admin Analytics API | `GET /api/v1/dashboard/analytics` — users, products, events, recommendations, top categories/searches |
+| Bootstrap 5 Jinja2 UI | login, dashboard, products, product_detail, admin/dashboard, admin/products |
+| JavaScript Event Tracker | `tracker.js` — batches events every 5s or 20 events, fire-and-forget |
+| Feedback System | `POST /recommendations/{id}/feedback` — liked/disliked → converted to behavioral event |
+| Admin User Picker | Dropdown in admin dashboard — select user without typing UUID |
+
+### ✅ Scheduler (APScheduler)
+| Job | Schedule | What it does |
+|---|---|---|
+| `daily_reco_refresh` | 08:00 UTC daily | Generate recommendations for active users who haven't had one in 23h; invalidate dashboard cache |
+| `cache_cleanup` | Every hour | Log Redis memory stats and key count |
+| `event_cleanup` | 02:00 UTC daily | Delete `UserEvent` records older than 90 days |
+
+Admin endpoints:
+- `POST /api/v1/admin/scheduler/run` — trigger any job immediately
+- `GET /api/v1/admin/scheduler/status` — scheduler state + per-job stats (next run, last run, duration, counts)
+
+### ✅ Email Notifications
+| Feature | Notes |
+|---|---|
+| `EmailService` | `app/services/email_service.py` — SMTP-based, HTML + plain text |
+| Recommendation digest email | Sent after every successful recommendation generation |
+| Welcome email | Sent after registration |
+| Email preview | `scripts/preview_email.py` — renders HTML locally in browser |
+| Graceful no-op | If SMTP not configured, all email calls silently skip |
+
+**To enable:** Set `EMAIL_ENABLED=true` + SMTP credentials in `.env`.
+
+### ✅ Developer Tools
+| Tool | Purpose |
+|---|---|
+| `scripts/seed_admin.py` | Create first admin account |
+| `scripts/seed_products.py` | Seed 20 AI/ML courses via Admin API |
+| `scripts/seed_user_events.py` | Seed behavioral events + trigger first recommendation |
+| `scripts/test_mesh_langsmith.py` | Smoke-test Mesh API + LangSmith connectivity |
+| `scripts/test_scheduler_ui.py` | Verify scheduler dashboard section and all 3 jobs |
+| `scripts/final_test.py` | Comprehensive 66-check end-to-end test suite |
+| `scripts/preview_email.py` | Generate + open email preview in browser |
+
+---
+
+## PARTIALLY IMPLEMENTED
+
+### 🔶 Recommendation Quality Gate
+**What exists:** Every trigger generates a new recommendation row regardless of quality.
+
+**Problem:** Auto-triggered runs sometimes produce empty content (model returns blank), creating low-confidence rows that overwrite good ones.
+
+**What's needed:** Only store a new recommendation if `confidence >= threshold` OR `force=True`.
 
 ```python
-# slowapi or custom Redis sliding window
-@limiter.limit("100/minute")
-async def ingest_batch(...):
+# In RecommendationService.generate()
+if result.confidence < 0.4 and not force:
+    logger.info("Low confidence result not stored. confidence=%.2f", result.confidence)
+    return existing_latest  # return the previous good result
 ```
 
----
+### 🔶 LangSmith Metadata Enrichment
+**What exists:** Basic auto-tracing of every LangGraph run via `LANGCHAIN_TRACING_V2=true`.
 
-### 1.4 Partial Product Update (PATCH)
-**Current**: `PUT /admin/products/{id}` requires sending all fields (full replacement).
-
-**Enhancement**: Add `PATCH` endpoint for partial updates — only send changed fields.
-
+**What's needed:** Add rich metadata per trace:
 ```python
-class PatchProductRequest(AppBaseSchema):
-    title: str | None = None
-    category: str | None = None
-    difficulty: str | None = None
-    tags: list[str] | None = None
-    is_active: bool | None = None
+@traceable(metadata={
+    "user_id": str(user_id),
+    "trigger_rule": trigger_reason,
+    "behavior_score": profile.engagement_score,
+    "candidate_count": len(candidates),
+    "retrieval_attempts": attempts,
+    "workflow_version": "v2",
+    "cache_hit": was_cached,
+})
 ```
 
 ---
 
-## Priority 2 — Recommendation Quality
+## ROADMAP (Future Enhancements)
 
-### 2.1 Collaborative Filtering Layer
-**Current**: Recommendations are purely content-based (user's own profile → similar products).
+### Priority 1 — Production Readiness
 
-**Enhancement**: Add user-user and item-item collaborative filtering using matrix factorisation.
-
+#### 🔲 Async Background Task Queue
+Move recommendation generation off the HTTP request thread.
 ```
-"Users like you also studied:" section on dashboard
-    ├─ Find users with similar event patterns (cosine similarity on interaction matrices)
-    ├─ Recommend products they engaged with that you haven't seen
-    └─ Blend with content-based score (weighted hybrid)
+POST /events/batch → persist → evaluate trigger → push user_id to queue → return 202
+Worker → RecommendationService.generate() → optionally push WebSocket notification
 ```
+**Tech:** ARQ (asyncio), Celery + Redis, or FastAPI `BackgroundTasks`.
+**Impact:** API latency drops from 2–10s to <100ms.
 
-**Approach**: Implicit feedback ALS (Alternating Least Squares) via `implicit` library, or neural collaborative filtering.
+#### 🔲 WebSocket / Server-Sent Events
+Push recommendation-ready notification to open browser tabs.
 
----
+#### 🔲 Rate Limiting
+Per-user sliding window limits on event ingest and recommendation generation.
 
-### 2.2 A/B Testing for Recommendation Strategies
-**Current**: One recommendation strategy for all users.
-
-**Enhancement**: Run multiple strategies simultaneously and compare CTR/conversion:
-
-```python
-class RecommendationStrategy(str, Enum):
-    CONTENT_BASED = "content_based"     # current LangGraph workflow
-    COLLABORATIVE  = "collaborative"     # user-user CF
-    HYBRID         = "hybrid"           # blend of both
-    TRENDING       = "trending"         # popularity-based fallback
-
-# Assign strategy by user_id hash bucket
-strategy = assign_strategy(user_id)
-```
-
-Track recommendation clicks → report CTR per strategy in admin analytics.
+#### 🔲 PATCH Product Endpoint
+Partial product updates — currently only full PUT replacement.
 
 ---
 
-### 2.3 Confidence Calibration
-**Current**: LLM self-reports confidence (0.0–1.0) — not calibrated against actual outcomes.
+### Priority 2 — Recommendation Quality
 
-**Enhancement**: Track recommendation → click → purchase conversion. Recalibrate confidence scores using historical accuracy:
+#### 🔲 Collaborative Filtering
+User-user and item-item similarity for "users like you also studied" section.
 
-```
-calibrated_confidence = model_confidence * historical_accuracy_for_similar_profiles
-```
+#### 🔲 A/B Testing for Recommendation Strategies
+Run multiple strategies (content-based, collaborative, trending) and compare CTR.
 
----
+#### 🔲 Feedback Loop Integration
+Use liked/disliked signals to re-weight categories and tags in future retrieval queries.
 
-### 2.4 Feedback Loop Integration
-**Current**: `POST /recommendations/{id}/feedback` stores a RATING event but the next recommendation generation doesn't use it differently.
+#### 🔲 Trending Recommendations
+Implement `GET /recommendations/trending` based on event velocity in last 24h.
 
-**Enhancement**: Weight liked/disliked recommendations in the behavior profile:
-- Liked → boost category/tags weight in interest extractor
-- Disliked → penalise that category for future retrieval queries
-
----
-
-### 2.5 Trending / Seasonal Recommendations
-**Current**: `GET /recommendations/trending` returns a placeholder.
-
-**Enhancement**: Implement trending based on:
-- Event velocity (products gaining most interactions in last 24h)
-- New courses (recently added)
-- Seasonal relevance (time-of-year weighting)
+#### 🔲 Confidence Calibration
+Track recommendation → click → purchase conversion and calibrate LLM confidence scores against actual outcomes.
 
 ---
 
-## Priority 3 — User Experience
+### Priority 3 — User Experience
 
-### 3.1 Email Notifications
-**Current**: No outbound communication.
+#### 🔲 User Onboarding Questionnaire
+3-step onboarding after registration to bootstrap the behavior profile before organic activity.
 
-**Enhancement**: Send email when a new recommendation is ready:
+#### 🔲 Semantic Search
+`GET /api/v1/products/search?q=` — embed query and return similar products from Qdrant rather than keyword filtering.
 
-```
-Subject: "Your personalised learning path is ready, A Sahu!"
-Body: recommendation summary + top 3 courses with CTAs
-```
+#### 🔲 Course Progress Tracking
+Add `ENROLL` and `COMPLETE` event types. Surface "continue learning" section on dashboard.
 
-**Tech**: FastAPI + `fastapi-mail` + SendGrid/Mailgun. Triggered in the `store_recommendation` node.
-
----
-
-### 3.2 User Onboarding Flow
-**Current**: New users see "No activity yet" immediately after registration.
-
-**Enhancement**: Add a 3-step onboarding questionnaire:
-1. What topics interest you? (multi-select categories)
-2. What's your current level? (beginner / intermediate / advanced)
-3. What's your goal? (career change / upskill / hobby)
-
-Store selections as synthetic events to bootstrap the behavior profile before any organic activity.
+#### 🔲 Push Notifications (Web Push API)
+Browser notifications when a new recommendation is ready — works even when the tab is closed.
 
 ---
 
-### 3.3 Course Progress Tracking
-**Current**: Only event tracking — no concept of "enrolled" or "completed".
+### Priority 4 — Observability
 
-**Enhancement**: 
-- Add `ENROLL` and `COMPLETE` event types
-- Track completion rate per category
-- Surface "continue learning" section on dashboard
-- Adjust recommendations to avoid already-completed courses
+#### 🔲 Prometheus Metrics
+Expose `/metrics` with recommendation counts, confidence histograms, cache hit rates, trigger fire counts.
 
----
+#### 🔲 Enhanced Health Check
+`/health/ready` should check Redis, Qdrant, and LLM API reachability — not just PostgreSQL.
 
-### 3.4 Search with Semantic Results
-**Current**: `/products` page lists all courses — basic category filter only.
-
-**Enhancement**: Real semantic search — embed the search query and return the most similar products from Qdrant:
-
-```python
-GET /api/v1/products/search?q=build+chatbots+with+python
-# → returns semantically relevant courses, not just keyword matches
-```
+#### 🔲 Event Archival Pipeline
+Actual archive-and-delete for events older than 90 days (currently only logged).
 
 ---
 
-## Priority 4 — Observability & Operations
+### Priority 5 — Scale
 
-### 4.1 Structured Metrics with Prometheus
-**Current**: Logs only.
+#### 🔲 Multi-Language Support
+Multilingual embedding model, locale detection, localised recommendation stories.
 
-**Enhancement**: Expose Prometheus metrics at `/metrics`:
+#### 🔲 LLM Fine-Tuning
+Fine-tune `Llama-3-8B` or `Mistral-7B` on validated recommendation pairs for lower latency + higher quality than zero-shot prompting.
 
-```
-smartreco_recommendations_total{status="success", model="minimax/m2-her"}
-smartreco_recommendation_confidence_histogram
-smartreco_cache_hit_rate{cache="dashboard"}
-smartreco_event_ingest_rate
-smartreco_trigger_fires_total{rule="purchase_or_wishlist"}
-```
-
-Use `prometheus-fastapi-instrumentator` for automatic HTTP metrics.
-
----
-
-### 4.2 LangSmith Metadata Enrichment
-**Current**: Basic LangGraph traces captured.
-
-**Enhancement**: Add rich metadata to every trace:
-
-```python
-@traceable(
-    name="SmartReco-AI/recommendation",
-    metadata={
-        "user_id": str(user_id),
-        "cache_hit": was_cached,
-        "trigger_rule": trigger_reason,
-        "behavior_score": profile.engagement_score,
-        "candidate_count": len(candidates),
-        "retrieval_attempts": attempts,
-        "workflow_version": "v2",
-    }
-)
-def _run_workflow(...):
-```
-
-Enables filtering traces by trigger rule, confidence range, user segment, etc.
-
----
-
-### 4.3 Health Check Enhancement
-**Current**: `/health/ready` checks DB only.
-
-**Enhancement**: Add dependency checks to readiness probe:
-
-```json
-GET /health/ready
-{
-  "status": "ready",
-  "checks": {
-    "database": "ok",
-    "redis": "ok",
-    "qdrant": "ok",
-    "llm_api": "ok"
-  }
-}
-```
-
-Return `degraded` (not `503`) when non-critical services (Redis, LLM) are unavailable.
-
----
-
-### 4.4 Event Archival Pipeline
-**Current**: `event_cleanup` job only logs the count of old events.
-
-**Enhancement**: Actually archive events older than 90 days to a cold storage table or S3:
-
-```sql
--- Archive to a partitioned cold storage table
-INSERT INTO user_events_archive SELECT * FROM user_events WHERE created_at < NOW() - INTERVAL '90 days';
-DELETE FROM user_events WHERE created_at < NOW() - INTERVAL '90 days';
-```
-
-Keeps the hot `user_events` table lean for fast analytics queries.
-
----
-
-## Priority 5 — Scale & Internationalisation
-
-### 5.1 Multi-Language Support
-**Current**: English-only product descriptions and recommendations.
-
-**Enhancement**: 
-- Use multilingual embedding model (`paraphrase-multilingual-MiniLM-L12-v2`)
-- Detect user's locale from browser `Accept-Language` header
-- Pass locale to LLM prompt for localised recommendation stories
-
----
-
-### 5.2 LLM Fine-Tuning
-**Current**: Zero-shot prompting with `minimax/m2-her`.
-
-**Enhancement**: Fine-tune a smaller model on high-quality recommendation examples:
-
-1. Collect 1,000+ human-validated recommendation pairs (profile → story)
-2. Fine-tune `Llama-3-8B` or `Mistral-7B` via LoRA
-3. Host on Together AI or deploy locally
-4. Replace `minimax/m2-her` with fine-tuned model for lower latency + higher quality
-
----
-
-### 5.3 Multi-Tenant Support
-**Current**: Single-tenant — all users and products share one namespace.
-
-**Enhancement**: Add `tenant_id` to users, products, and events to support multiple organisations on one deployment. Each tenant gets isolated:
-- Product catalogue
-- Recommendation models
-- Analytics dashboards
-- Cache namespaces: `{tenant_id}:behavior:{user_id}`
-
----
-
-### 5.4 Vector Index Optimisation
-**Current**: Flat cosine similarity search in Qdrant.
-
-**Enhancement**: 
-- Add HNSW index tuning (`m=16`, `ef_construct=100`) for faster search at scale
-- Implement payload filtering in Qdrant to pre-filter by `is_active` and `category` before vector similarity
-- Add vector quantisation (scalar or product) to reduce memory footprint at 100k+ products
+#### 🔲 Multi-Tenant Support
+Add `tenant_id` to isolate product catalogues, recommendations, and analytics per organisation.
 
 ---
 
 ## Summary Table
 
-| Enhancement | Priority | Effort | Impact |
-|---|---|---|---|
-| Async background tasks | 1 | Medium | Very High |
-| WebSocket real-time push | 1 | Medium | High |
-| Rate limiting | 1 | Low | High |
-| PATCH product update | 1 | Low | Medium |
-| Collaborative filtering | 2 | High | Very High |
-| A/B testing strategies | 2 | High | High |
-| Feedback loop integration | 2 | Medium | High |
-| Trending recommendations | 2 | Medium | Medium |
-| Email notifications | 3 | Low | Medium |
-| Onboarding flow | 3 | Medium | High |
-| Semantic search | 3 | Low | High |
-| Prometheus metrics | 4 | Low | High |
-| LangSmith enrichment | 4 | Low | Medium |
-| Event archival | 4 | Medium | Medium |
-| Multi-language | 5 | High | High |
-| LLM fine-tuning | 5 | Very High | Very High |
-| Multi-tenant | 5 | Very High | High |
+| Feature | Status | Priority |
+|---|---|---|
+| Async background tasks | 🔲 | 1 — High |
+| Recommendation quality gate | 🔶 | 1 — High |
+| WebSocket real-time push | 🔲 | 1 — Medium |
+| Rate limiting | 🔲 | 1 — Medium |
+| PATCH product update | 🔲 | 1 — Low |
+| Collaborative filtering | 🔲 | 2 — Very High |
+| A/B testing | 🔲 | 2 — High |
+| Feedback loop re-weighting | 🔶 | 2 — High |
+| Trending recommendations | 🔲 | 2 — Medium |
+| Confidence calibration | 🔲 | 2 — Medium |
+| LangSmith metadata enrichment | 🔶 | 2 — Medium |
+| Onboarding questionnaire | 🔲 | 3 — High |
+| Semantic search | 🔲 | 3 — High |
+| Course progress tracking | 🔲 | 3 — Medium |
+| Email notifications | ✅ | 3 — Done |
+| Prometheus metrics | 🔲 | 4 — Medium |
+| Enhanced health check | 🔲 | 4 — Low |
+| Event archival | 🔲 | 4 — Low |
+| Multi-language | 🔲 | 5 — High |
+| LLM fine-tuning | 🔲 | 5 — Very High |
+| Multi-tenant | 🔲 | 5 — High |

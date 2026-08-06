@@ -117,6 +117,10 @@ class EventResponse(AppBaseSchema):
 
     ``from_attributes=True`` (from ``AppBaseSchema``) allows direct
     construction from an ORM instance.
+
+    Note: the ORM column was renamed from ``metadata`` to ``event_metadata``
+    to avoid clashing with SQLAlchemy's reserved ``metadata`` attribute.
+    The JSON response still uses the key ``metadata`` via ``validation_alias``.
     """
 
     id: uuid.UUID
@@ -125,7 +129,10 @@ class EventResponse(AppBaseSchema):
     event_type: EventType
     product_id: uuid.UUID | None
     search_query: str | None
-    metadata: dict[str, Any]
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        validation_alias="event_metadata",
+    )
     created_at: datetime
 
 

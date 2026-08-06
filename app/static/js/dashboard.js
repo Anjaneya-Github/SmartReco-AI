@@ -6,7 +6,7 @@
   'use strict';
 
   const token = localStorage.getItem('access_token');
-  if (!token) { window.location = '/login'; return; }
+  if (!token) { window.location.replace('/login'); return; }
 
   let _recoId = null;
 
@@ -21,7 +21,7 @@
   async function load() {
     try {
       const r = await fetch('/api/v1/dashboard', { headers: { 'Authorization': 'Bearer ' + token } });
-      if (r.status === 401) { window.location = '/login'; return; }
+      if (r.status === 401) { window.location.replace('/login'); return; }
       const d = await r.json();
       render(d);
     } catch (e) {

@@ -152,10 +152,27 @@ class RecommendationService:
 
         result_dict: dict | None = final_state.get("result")
         if not result_dict:
-            # Graph encountered an unrecoverable error and stored a fallback
             result_dict = final_state.get("result") or {}
 
-        return self._dict_to_result(result_dict)
+        result = self._dict_to_result(result_dict)
+
+        # Send email notification (fire-and-forget, never blocks)
+        try:
+            from app.services.email_service import EmailService
+            EmailService().send_recommendation_digest(
+                to_email=user.email,
+                user_name=user.full_name or user.email.split("@")[0],
+                summary=result.summary,
+                products=[
+                    {"title": p.title, "category": p.category, "difficulty": p.difficulty}
+                    for p in result.recommended_products
+                ],
+                confidence=result.confidence,
+            )
+        except Exception as exc:
+            logger.debug("Email notification skipped. error=%s", exc)
+
+        return result
 
     # ------------------------------------------------------------------ #
     # Read cached result                                                  #
