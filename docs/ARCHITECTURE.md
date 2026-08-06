@@ -1,6 +1,17 @@
-# SmartReco AI — Architecture
+# SmartReco AI — Architecture Reference
 
-## System Architecture Flow Diagram
+> **Audience:** Developers, architects, and reviewers who want to understand how the system is structured.
+>
+> **What's here:** System-level diagrams, LangGraph workflow detail, full data flow, and cache architecture — all as ASCII art that renders in any Markdown viewer.
+>
+> **Related docs:**
+> - [`docs/prd.md`](prd.md) — What the system does (requirements)
+> - [`docs/feature_enhancements.md`](feature_enhancements.md) — What's built and what's planned
+> - [`README.md`](../README.md) — Full setup and API guide
+
+---
+
+## 1. System Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
