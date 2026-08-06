@@ -613,22 +613,46 @@ Cache is invalidated on:
 
 ## 17. AI Guardrails
 
-Three lightweight guardrail layers protect the LLM pipeline:
+Three guardrail layers protect the LLM pipeline and are **wired directly into the LangGraph workflow nodes**.
+
+### Where each guardrail runs
+
+```
+build_query node
+    └─ PromptSanitizer.sanitize(query)
+           Strip HTML, remove control chars, normalise whitespace, truncate to 500 chars
+           Applied before the query reaches vector search or any prompt
+
+generate_recommendation node
+    └─ PromptGuard.check(full_prompt)
+           Scan assembled prompt for 10 injection patterns
+           If detected → return {"error": "prompt_blocked"} → workflow stores fallback
+           LLM is never called with a poisoned prompt
+
+validate_products node
+    └─ OutputGuard.validate(llm_output, valid_product_ids)
+           Strip hallucinated product IDs not in the candidate set
+           Remove duplicate product IDs
+           Clamp confidence to [0.0, 1.0]
+           Enforce maximum 5 products
+           If all IDs invalid → fallback to top-N candidates, confidence ≤ 0.30
+```
 
 ### Prompt Guard (`app/security/prompt_guard.py`)
-Detects and rejects prompt injection patterns before they reach the LLM:
-- "ignore previous instructions"
-- "reveal system prompt / API key"
-- "jailbreak", "developer mode", "act as unrestricted"
-- "bypass filter / restriction"
-- "forget all instructions"
+Detects and rejects 10 prompt injection patterns before they reach the LLM:
+- "ignore previous/all instructions"
+- "reveal system prompt / API key / secret"
+- "jailbreak", "developer mode", "DAN"
+- "bypass filter / restriction / safety"
+- "forget all instructions", "disregard instructions"
+- "act as unrestricted", "you are now a different AI"
 
 ### Prompt Sanitizer (`app/security/prompt_sanitizer.py`)
-Cleans user-supplied text before embedding in any prompt:
+Cleans user-derived text before it enters any prompt:
 - Strips HTML tags and unescapes HTML entities
-- Removes control characters (non-printable ASCII)
-- Normalizes whitespace and consecutive newlines
-- Truncates to configurable max length (default 2000 chars)
+- Removes invisible control characters (non-printable ASCII)
+- Normalizes whitespace and collapses consecutive blank lines
+- Truncates to configurable max length (query: 500 chars, general: 2000 chars)
 
 ### Output Guard (`app/security/output_guard.py`)
 Validates LLM recommendation output before persistence:

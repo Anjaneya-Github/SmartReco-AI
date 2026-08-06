@@ -108,9 +108,10 @@ Everything a User can do, plus:
 - **FR-REC-7:** Every workflow run is traced in LangSmith automatically.
 
 ### 4.7 AI Guardrails
-- **FR-GUARD-1:** `PromptGuard` detects and rejects 10 injection patterns before any LLM call.
-- **FR-GUARD-2:** `PromptSanitizer` strips HTML, removes control characters, normalises whitespace, truncates to 2000 chars.
-- **FR-GUARD-3:** `OutputGuard` validates: confidence in [0.0, 1.0], no duplicate IDs, all IDs exist in the candidate set, max 5 products.
+- **FR-GUARD-1:** `PromptSanitizer` is called in the `build_query` workflow node — sanitizes the retrieval query before it reaches vector search or any prompt (strips HTML, removes control chars, normalises whitespace, truncates to 500 chars).
+- **FR-GUARD-2:** `PromptGuard` is called in the `generate_recommendation` node — scans the fully assembled LLM prompt for 10 injection patterns before calling the Mesh API. If a pattern is detected, the node returns an error state and the workflow stores a fallback result without calling the LLM.
+- **FR-GUARD-3:** `OutputGuard` is called in the `validate_products` node — validates the LLM JSON response: confidence clamped to [0.0, 1.0], duplicate product IDs removed, hallucinated IDs (not in candidate set) stripped, maximum 5 products enforced.
+- **FR-GUARD-4:** All three guardrails are wired into production workflow nodes, not just tests.
 
 ### 4.8 Recommendation Dashboard
 - **FR-DASH-1:** `GET /api/v1/dashboard` is read-only — it never triggers the LLM.

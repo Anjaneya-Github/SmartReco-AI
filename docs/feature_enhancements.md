@@ -35,7 +35,7 @@
 | Mesh API Integration | `minimax/m2-her` free model, 32k context, OpenAI-compatible via `base_url` |
 | LangSmith Tracing | Auto-captured via `LANGCHAIN_TRACING_V2=true` on every graph run |
 | Recommendation Trigger | 4 rules: ≥20 events, repeated search, purchase/wishlist, 10-min inactivity |
-| AI Guardrails | PromptGuard (injection detection), PromptSanitizer (HTML strip, truncate), OutputGuard (dedup, ID validation, confidence clamp) |
+| AI Guardrails — **wired in workflow** | `PromptSanitizer` in `build_query` node → `PromptGuard` in `generate_recommendation` node → `OutputGuard` in `validate_products` node |
 | Recommendation Persistence | Immutable rows in PostgreSQL, dashboard reads latest |
 
 ### ✅ Dashboard & UI
