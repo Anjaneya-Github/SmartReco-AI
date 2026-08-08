@@ -33,7 +33,6 @@
 19. [LangSmith Tracing](#19-langsmith-tracing)
 20. [API Endpoints](#20-api-endpoints)
 21. [Development Steps](#21-development-steps)
-22. [Future Enhancements](#22-future-enhancements)
 
 ---
 
@@ -881,31 +880,12 @@ This section documents every step taken to build SmartReco AI from scratch.
 
 ---
 
-## 22. Future Enhancements
-
-> 📋 **Full enhancement roadmap:** [`docs/feature_enhancements.md`](docs/feature_enhancements.md)
-
-| Feature | Priority |
-|---|---|
-| Async background task queue — remove LLM latency from HTTP path | 1 — High |
-| Recommendation quality gate — skip low-confidence fallback rows | 1 — High |
-| WebSocket / SSE real-time dashboard push | 1 — Medium |
-| Collaborative filtering ("users like you also studied") | 2 — Very High |
-| Feedback loop re-weighting for future retrievals | 2 — High |
-| Semantic search on product catalogue | 3 — High |
-| User onboarding questionnaire | 3 — High |
-| Prometheus metrics at `/metrics` | 4 — Medium |
-| LLM fine-tuning on validated recommendation pairs | 5 — Very High |
-
----
-
 ## Docs
 
 | Document | Description |
 |---|---|
 | [`docs/architecture.md`](docs/architecture.md) | Full system architecture diagrams, LangGraph workflow, data flow, cache architecture |
 | [`docs/challenges.md`](docs/challenges.md) | 15 real challenges encountered and how each was solved |
-| [`docs/feature_enhancements.md`](docs/feature_enhancements.md) | What's built, what's partial, full roadmap with priority table |
 
 ---
 
