@@ -885,7 +885,6 @@ This section documents every step taken to build SmartReco AI from scratch.
 | Document | Description |
 |---|---|
 | [`docs/architecture.md`](docs/architecture.md) | Full system architecture diagrams, LangGraph workflow, data flow, cache architecture |
-| [`docs/challenges.md`](docs/challenges.md) | 15 real challenges encountered and how each was solved |
 
 ---
 
