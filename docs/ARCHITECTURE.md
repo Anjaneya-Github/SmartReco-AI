@@ -6,7 +6,6 @@
 >
 > **Related docs:**
 > - [`docs/prd.md`](prd.md) — What the system does (requirements)
-> - [`docs/feature_enhancements.md`](feature_enhancements.md) — What's built and what's planned
 > - [`README.md`](../README.md) — Full setup and API guide
 
 ---
