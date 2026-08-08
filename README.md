@@ -867,17 +867,6 @@ This section documents every step taken to build SmartReco AI from scratch.
 - Fixed Redis blocking: `CacheClient` now uses `lru_cache` to avoid repeated timeouts
 - Seeded 20 AI/ML courses via `scripts/seed_products.py`
 - Seeded user behavioral events + triggered first recommendation via `scripts/seed_user_events.py`
-
-### Step 11 — Bug Fixes & Polish
-- Fixed login page flickering: async token validation before redirect, `location.replace()` to prevent history loop, excluded `tracker.js` from login page
-- Fixed `EventResponse` schema: added `validation_alias="event_metadata"` to map renamed ORM attribute
-- Fixed scheduler card hidden inside conditional `#analytics-content` div — moved outside as always-visible section
-- Added admin user picker dropdown (`GET /api/v1/admin/users`) — no more manual UUID typing
-- Added `EmailService` with SMTP-based recommendation digest and welcome emails (graceful no-op if not configured)
-- Added `scripts/preview_email.py` to generate and open email HTML preview locally
-- Added `scripts/final_test.py` — 66-check comprehensive end-to-end test suite
-- All 66/66 checks passing
-
 ---
 
 ## Docs
