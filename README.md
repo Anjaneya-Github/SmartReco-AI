@@ -915,7 +915,9 @@ This section documents every step taken to build SmartReco AI from scratch.
 
 | File | Description |
 |---|---|
+| `docs/screenshots/HLD.png` | Architecture |
 | `docs/screenshots/dashboard.png` | User AI dashboard with recommendation story |
+| `docs/screenshots/admin.png` | User AI dashboard with recommendation story |
 | `docs/screenshots/products.png` | Course catalogue grid |
 | `docs/screenshots/mesh_api.png` | Mesh API smoke test output |
 | `docs/screenshots/ls_observability.png` | LangSmith trace dashboard |

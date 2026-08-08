@@ -54,4 +54,5 @@ logs/
 # ── Internal dev notes (not for public repo) ─────────────────────
 docs/design.md
 docs/testing.md
+docs/challenges.md
 scripts/email_preview.html
