@@ -169,7 +169,7 @@ Everything a User can do, plus:
 | LLM Provider | Mesh API (`minimax/m2-her`, OpenAI-compatible) |
 | Observability | LangSmith |
 | Scheduler | APScheduler 3.x |
-| Frontend | Jinja2 + Bootstrap 5 + Vanilla JS |
+| Frontend | Jinja2 templates + Bootstrap 5.3.3 (CDN) + Bootstrap Icons (CDN) + Vanilla JS |
 | Auth | python-jose (JWT) + passlib (bcrypt) |
 | Validation | Pydantic v2 |
 

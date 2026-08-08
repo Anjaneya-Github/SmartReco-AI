@@ -13,11 +13,16 @@
 
 ## 1. System Architecture
 
+> **Frontend note:** Bootstrap 5.3.3 and Bootstrap Icons are loaded from **jsDelivr CDN**
+> (no npm/pip install). The templates are server-rendered Jinja2 HTML.
+> All dashboard data is loaded client-side via `fetch()` calls to the JSON API.
+> Vanilla JS only — no React, Vue, or Angular.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                              CLIENT LAYER                                        │
 │                                                                                  │
-│   Browser (Bootstrap 5 UI)          API Consumer (Swagger / curl / SDK)         │
+│   Browser (Bootstrap 5 UI — CDN)    API Consumer (Swagger / curl / SDK)         │
 │   /login  /dashboard  /products     /api/v1/...                                 │
 │   /admin/dashboard  /admin/products                                              │
 └─────────────────────────────┬───────────────────────────────────────────────────┘
