@@ -54,14 +54,16 @@ Every user interaction (view, click, search, purchase, wishlist, rating) is trac
 | **Behavior Intelligence** | InterestExtractor, EngagementScorer, BehaviorAnalyzer — pure Python, DB-free |
 | **Recommendation Trigger** | 4 rules: new events threshold, repeated search, purchase/wishlist, inactivity |
 | **LangGraph Workflow** | 8-node stateful graph with retrieval quality loop and conditional edges |
+| **Feedback Loop** | liked/disliked feedback boosts or suppresses categories in next retrieval query |
 | **Mesh API** | All LLM calls routed through Mesh API (OpenAI-compatible endpoint) |
 | **LangSmith** | Full trace capture for every LangGraph run |
-| **Dashboard** | Read-only JSON API + Jinja2 Bootstrap 5 UI |
+| **Dashboard** | Read-only JSON API + Jinja2 Bootstrap 5 UI (CDN) |
 | **Redis Cache** | behavior (10 min), recommendation (30 min), dashboard (5 min), search (30 min) |
-| **AI Guardrails** | Prompt injection detection, sanitization, output validation |
-| **Feedback** | POST /recommendations/{id}/feedback → converts to behavioral event |
+| **AI Guardrails** | PromptSanitizer → PromptGuard → OutputGuard wired into workflow nodes |
+| **Feedback** | POST /recommendations/{id}/feedback → converts to behavioral event + shapes next query |
 | **Admin Analytics** | Users, products, events, recommendations, top categories, top searches |
 | **Scheduler** | APScheduler: daily recommendation refresh, hourly cache cleanup, daily event cleanup |
+| **Email** | SMTP recommendation digest email after every generation (optional) |
 
 ---
 
@@ -150,9 +152,12 @@ START
   │
   ▼
 load_profile          ← BehaviorAnalyzer → EventRepository + ProductRepository
+  │                     + extracts liked/disliked feedback from RATING events
   │
   ▼
 build_query           ← Builds pipe-delimited vector search query from profile
+  │                     liked categories → BOOSTED in query ("preferred: ...")
+  │                     disliked categories → SUPPRESSED from query
   │
   ▼
 retrieve_products ◄────────────────────────────────┐
@@ -166,10 +171,10 @@ evaluate_quality      ← checks count + category overlap
       "poor" + exhausted  ──────────────────────────► (force through)
   │
   ▼
-generate_recommendation   ← Mesh API LLM (OpenAI-compatible)
+generate_recommendation   ← PromptGuard check → Mesh API LLM call
   │                          LangSmith trace captured here
   ▼
-validate_products         ← Strip hallucinated IDs, clamp confidence
+validate_products         ← OutputGuard: strip hallucinated IDs, dedup, clamp confidence
   │
   ▼
 store_recommendation      ← PostgreSQL commit
@@ -185,9 +190,9 @@ State flows through a `TypedDict` (`RecommendationState`). Each node receives an
 ## 6. Recommendation Pipeline
 
 ```
-User Action (view / click / purchase / search)
+User browses / searches / purchases a course
           │
-          ▼
+          ▼  tracker.js (batch every 5s / 20 events)
 POST /api/v1/events/batch
           │
           ▼
@@ -198,7 +203,7 @@ RecommendationService.should_generate()
           │
     ┌─────┴──────────────────────────────────┐
     │  Rule 1: ≥ 20 new events               │
-    │  Rule 2: repeated search query         │  OR logic
+    │  Rule 2: repeated search query         │  OR logic — any one fires
     │  Rule 3: purchase / wishlist event     │
     │  Rule 4: inactive ≥ 10 minutes         │
     └─────┬──────────────────────────────────┘
@@ -208,12 +213,24 @@ RecommendationService.generate()
           │
           ▼
    LangGraph Workflow (8 nodes)
+   └─ load_profile: behavior + feedback signals (liked/disliked categories)
+   └─ build_query:  liked → boosted · disliked → suppressed
+   └─ retrieve:     Qdrant semantic search
+   └─ generate:     Mesh API LLM (PromptGuard protected)
+   └─ validate:     OutputGuard
+   └─ store:        PostgreSQL commit
           │
           ▼
-   Recommendation persisted  ──► recommendations table
+GET /api/v1/dashboard  ──► reads from DB + Redis cache (never calls LLM)
           │
           ▼
-GET /api/v1/dashboard  ──► reads from DB + Redis cache
+User submits feedback (liked / disliked)
+POST /api/v1/recommendations/{id}/feedback
+          │
+          ▼
+Stored as RATING event → feeds back into NEXT load_profile
+          └─► liked categories boosted in next retrieval query
+          └─► disliked categories removed from next retrieval query
 ```
 
 ---
