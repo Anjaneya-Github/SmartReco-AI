@@ -116,6 +116,9 @@ def load_profile(state: RecommendationState, deps: WorkflowDeps) -> dict:
     Reads from EventRepository + ProductRepository via BehaviorAnalyzer.
     Serialises the profile to a plain dict so state stays JSON-safe.
 
+    Also extracts explicit feedback signals from recent RATING events
+    (liked / disliked) so ``build_query`` can boost or suppress categories.
+
     Returns:
         ``{"profile": <dict>}``
     """
@@ -124,20 +127,95 @@ def load_profile(state: RecommendationState, deps: WorkflowDeps) -> dict:
 
     profile = deps.analyzer.build_profile(user_id)
 
+    # ── Feedback signal extraction ────────────────────────────────────
+    # When a user submits liked/disliked feedback on a recommendation,
+    # it is stored as a RATING event with metadata = {"feedback": "liked"/"disliked"}.
+    # We extract the most recent 20 such events and summarise which
+    # product categories the user explicitly approved or rejected.
+    #
+    # This allows build_query to BOOST liked categories and SUPPRESS
+    # disliked ones in the retrieval query — closing the feedback loop.
+    liked_categories: list[str] = []
+    disliked_categories: list[str] = []
+
+    try:
+        from app.models.event import EventType
+        from sqlalchemy import select
+        from app.models.event import UserEvent as UE
+
+        # Get recent RATING events that have a "feedback" metadata key
+        rating_events = list(
+            deps.db.execute(
+                select(UE)
+                .where(
+                    UE.user_id == user_id,
+                    UE.event_type == EventType.RATING,
+                )
+                .order_by(UE.created_at.desc())
+                .limit(20)
+            ).scalars().all()
+        )
+
+        for evt in rating_events:
+            feedback = (evt.event_metadata or {}).get("feedback")
+            reco_id  = (evt.event_metadata or {}).get("recommendation_id")
+            if not feedback or not reco_id:
+                continue
+
+            # Look up the categories of products in that recommendation
+            from app.models.recommendation import Recommendation
+            from app.models.product import Product as ProductModel
+            reco = deps.db.get(Recommendation, reco_id)
+            if not reco:
+                continue
+
+            pids = [
+                uuid.UUID(p["product_id"])
+                for p in reco.recommended_products
+                if isinstance(p, dict) and p.get("product_id")
+            ]
+            products = deps.db.execute(
+                select(ProductModel).where(ProductModel.id.in_(pids))
+            ).scalars().all()
+            cats = [p.category for p in products if p.category]
+
+            if feedback == "liked":
+                liked_categories.extend(cats)
+            elif feedback == "disliked":
+                disliked_categories.extend(cats)
+
+    except Exception as exc:
+        # Feedback extraction is best-effort — never block a recommendation
+        logger.debug("workflow:load_profile feedback extraction skipped. error=%s", exc)
+
+    # Deduplicate and take most frequent
+    from collections import Counter
+    liked_top    = [c for c, _ in Counter(liked_categories).most_common(3)]
+    disliked_top = [c for c, _ in Counter(disliked_categories).most_common(3)]
+
+    if liked_top or disliked_top:
+        logger.info(
+            "workflow:load_profile feedback signals: liked=%s disliked=%s",
+            liked_top, disliked_top,
+        )
+
     return {
         "profile": {
-            "primary_categories": profile.primary_categories,
-            "favorite_tags":      profile.favorite_tags,
-            "top_searches":       profile.top_searches,
-            "search_frequency":   profile.search_frequency,
-            "engagement_score":   profile.engagement_score,
-            "learning_level":     profile.learning_level,
+            "primary_categories":     profile.primary_categories,
+            "favorite_tags":          profile.favorite_tags,
+            "top_searches":           profile.top_searches,
+            "search_frequency":       profile.search_frequency,
+            "engagement_score":       profile.engagement_score,
+            "learning_level":         profile.learning_level,
             "recent_activity_summary": profile.recent_activity_summary,
-            "total_events_analysed":   profile.total_events_analysed,
-            "last_active_at":     (
+            "total_events_analysed":  profile.total_events_analysed,
+            "last_active_at": (
                 profile.last_active_at.isoformat()
                 if profile.last_active_at else None
             ),
+            # Explicit feedback re-weighting signals
+            "liked_categories":    liked_top,
+            "disliked_categories": disliked_top,
         }
     }
 
@@ -150,7 +228,16 @@ def build_query(state: RecommendationState, deps: WorkflowDeps) -> dict:
     """
     Node 2 — Translate the BehaviorProfile into a retrieval query string.
 
-    The query is a pipe-delimited string of the user's top interests.
+    The query is a pipe-delimited string of the user's top interests,
+    boosted by explicitly liked categories and filtered of disliked ones.
+
+    Feedback loop
+    ~~~~~~~~~~~~~
+    - ``liked_categories``    from the profile → prepended to the query
+      so Qdrant surfaces similar content first.
+    - ``disliked_categories`` → removed from the category list so we
+      don't keep recommending content the user rejected.
+
     Falls back to a generic query when the profile is empty.
 
     Returns:
@@ -159,9 +246,26 @@ def build_query(state: RecommendationState, deps: WorkflowDeps) -> dict:
     profile: dict = state.get("profile") or {}
     logger.debug("workflow:build_query profile_keys=%s", list(profile.keys()))
 
+    # Feedback signals from load_profile
+    liked_cats    = set(profile.get("liked_categories")    or [])
+    disliked_cats = set(profile.get("disliked_categories") or [])
+
     parts: list[str] = []
 
-    cats = profile.get("primary_categories") or []
+    # ── Boost: put liked categories FIRST in the query ───────────────
+    # Qdrant's embedding will weight the front of the query more heavily.
+    if liked_cats:
+        parts.append("preferred: " + ", ".join(sorted(liked_cats)))
+        logger.debug("workflow:build_query boosting liked=%s", liked_cats)
+
+    # ── Primary categories (minus disliked) ──────────────────────────
+    cats = [
+        c for c in (profile.get("primary_categories") or [])
+        if c not in disliked_cats          # suppress user-rejected categories
+    ]
+    if disliked_cats:
+        logger.debug("workflow:build_query suppressing disliked=%s", disliked_cats)
+
     if cats:
         parts.append("categories: " + ", ".join(cats[:3]))
 
@@ -179,8 +283,7 @@ def build_query(state: RecommendationState, deps: WorkflowDeps) -> dict:
 
     query = " | ".join(parts) if parts else "learning courses"
 
-    # Sanitize the query before it's used in vector search or an LLM prompt.
-    # This strips HTML, removes control characters, and normalises whitespace.
+    # Sanitize before use in vector search or LLM prompt
     from app.security.prompt_sanitizer import PromptSanitizer
     query = PromptSanitizer.sanitize(query, max_length=500)
 
