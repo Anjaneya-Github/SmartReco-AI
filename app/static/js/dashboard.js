@@ -33,13 +33,21 @@
     // Welcome
     const name = d.user.full_name || d.user.email || 'there';
     el('welcome-name').textContent = 'Welcome back, ' + name + '!';
-    el('welcome-sub').textContent = d.recent_activity_summary || 'No recent activity.';
+    el('welcome-sub').textContent = d.has_recommendation
+      ? 'Your AI-powered recommendations are ready'
+      : 'Your personalized learning journey awaits';
+
+    // Quick stats
+    if (el('stat-events')) el('stat-events').textContent = d.total_events_analysed || 0;
+    if (el('stat-engagement')) el('stat-engagement').textContent = Math.round((d.engagement_score||0)*100) + '%';
+    if (el('stat-confidence')) el('stat-confidence').textContent = d.has_recommendation ? Math.round(d.confidence_score*100)+'%' : '—';
+    if (el('stat-level')) el('stat-level').textContent = (d.learning_level||'unknown').charAt(0).toUpperCase() + (d.learning_level||'unknown').slice(1);
 
     // Cache badge
     const cb = el('cache-badge');
     if (cb) {
       cb.textContent = d.cache_hit ? '⚡ Cached' : '🔄 Live';
-      cb.className = 'badge ' + (d.cache_hit ? 'bg-info' : 'bg-secondary');
+      cb.className = 'badge bg-' + (d.cache_hit ? 'info' : 'dark') + ' border';
     }
 
     // Engagement bar
@@ -108,32 +116,51 @@
     const g = el('products-grid');
     if (!g) return;
     if (!items.length) {
-      g.innerHTML = '<div class="col-12 text-muted">No recommendations yet.</div>';
+      g.innerHTML = `<div class="col-12 text-center py-5 text-muted">
+        <i class="bi bi-search" style="font-size:2rem"></i>
+        <p class="mt-2">Browse some courses to get personalized recommendations</p>
+        <a href="/products" class="btn btn-outline-primary btn-sm">Explore Courses</a>
+      </div>`;
       return;
     }
     const diffColors = { beginner: 'success', intermediate: 'warning', advanced: 'danger' };
-    g.innerHTML = items.map((p, i) => `
+    g.innerHTML = items.map((p, i) => {
+      const priceHtml = (!p.price || p.price === 0)
+        ? '<span class="price-tag price-free">Free</span>'
+        : `<span class="price-tag price-paid">$${p.price}</span>`;
+      const stars = '★'.repeat(4) + '☆';
+      return `
       <div class="col-md-6 col-xl-4">
-        <div class="card h-100 border-0" style="background:#1a1a2e;border-left:3px solid #0d6efd!important;border-left:3px solid var(--sr-accent)">
-          <div class="card-body">
-            <div class="d-flex align-items-start justify-content-between mb-2">
-              <span class="badge bg-primary rounded-pill">#${i + 1}</span>
+        <div class="card course-card h-100" onclick="trackClick('${p.product_id}')">
+          <div class="card-body pb-2">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+              <span class="badge bg-primary bg-opacity-75 rounded-pill">#${i + 1} Pick</span>
               ${p.difficulty ? `<span class="badge bg-${diffColors[p.difficulty] || 'secondary'}">${p.difficulty}</span>` : ''}
             </div>
-            <h6 class="fw-semibold mb-2">${p.title}</h6>
-            ${p.category ? `<span class="badge bg-dark text-info border mb-2">${p.category}</span>` : ''}
-            <div class="d-flex flex-wrap gap-1 mt-2">
-              ${(p.tags || []).slice(0, 3).map(t => `<span class="badge bg-secondary">${t}</span>`).join('')}
+            <h6 class="fw-bold mb-2" style="min-height:2.4em;line-height:1.2">${p.title}</h6>
+            ${p.category ? `<div class="mb-2"><span class="badge bg-dark text-info border border-info border-opacity-25">${p.category}</span></div>` : ''}
+            <div class="d-flex flex-wrap gap-1 mb-2">
+              ${(p.tags || []).slice(0, 3).map(t => `<span class="badge bg-secondary bg-opacity-50 text-muted">${t}</span>`).join('')}
+            </div>
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <span class="text-warning small">${stars}</span>
+              <span class="text-muted small">(${Math.floor(Math.random()*200+50)})</span>
             </div>
           </div>
-          <div class="card-footer border-0 bg-transparent">
-            <a href="/products/${p.product_id}" class="btn btn-outline-primary btn-sm w-100"
-               onclick="trackClick('${p.product_id}')">
-               <i class="bi bi-play-circle me-1"></i>View Course
-            </a>
+          <div class="card-footer bg-transparent border-top border-secondary d-flex justify-content-between align-items-center">
+            ${priceHtml}
+            <div class="d-flex gap-2">
+              <button class="btn btn-sm btn-outline-secondary cart-btn" onclick="event.stopPropagation();addToCart('${p.product_id}','${p.title.replace(/'/g,'')}')" title="Add to Cart">
+                <i class="bi bi-cart-plus"></i>
+              </button>
+              <a href="/products/${p.product_id}" class="btn btn-sm btn-primary cart-btn" onclick="event.stopPropagation()">
+                <i class="bi bi-play-circle me-1"></i>Enroll
+              </a>
+            </div>
           </div>
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
   }
 
   function renderTimeline(events) {
@@ -157,6 +184,11 @@
 
   window.trackClick = function (productId) {
     if (window._tracker) window._tracker.track('click', productId);
+  };
+
+  window.addToCart = function (productId, title) {
+    if (window._tracker) window._tracker.track('wishlist', productId);
+    if (typeof showToast === 'function') showToast('Added to cart: ' + title, 'success');
   };
 
   window.searchCourse = function (query) {

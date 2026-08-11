@@ -1,25 +1,89 @@
 {% extends "base.html" %}
 {% block title %}Course Detail — SmartReco AI{% endblock %}
+{% block extra_head %}
+<style>
+  .hero-course { background: linear-gradient(135deg, #1a1a3e 0%, #0d6efd11 100%); border-radius:12px; }
+  .price-big { font-size:2rem; font-weight:800; }
+  .price-free { color:#28a745; }
+  .price-paid { color:#0dcaf0; }
+  .action-btn { padding:12px 28px; font-weight:600; border-radius:8px; }
+</style>
+{% endblock %}
 {% block content %}
-<div class="container py-4" style="max-width:800px">
-  <a href="/products" class="btn btn-outline-secondary btn-sm mb-3"><i class="bi bi-arrow-left me-1"></i>Back</a>
+<div class="container py-4" style="max-width:900px">
+  <a href="/products" class="btn btn-outline-secondary btn-sm mb-3"><i class="bi bi-arrow-left me-1"></i>Back to Catalogue</a>
+
   <div id="detail-loading" class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+
   <div id="detail-content" class="d-none">
-    <div class="card">
-      <div class="card-body p-4">
-        <div class="d-flex justify-content-between align-items-start mb-3">
-          <h3 class="fw-bold mb-0" id="d-title"></h3>
-          <span class="badge bg-success ms-3" id="d-price"></span>
+    <!-- Hero Section -->
+    <div class="hero-course p-4 mb-4">
+      <div class="row align-items-center">
+        <div class="col-lg-8">
+          <div class="d-flex flex-wrap gap-2 mb-2" id="d-badges"></div>
+          <h2 class="fw-bold mb-2" id="d-title"></h2>
+          <p class="text-muted mb-3" id="d-desc"></p>
+          <div class="d-flex flex-wrap gap-1 mb-3" id="d-tags"></div>
+          <div class="d-flex align-items-center gap-2 text-warning mb-2">
+            <span>★★★★☆</span>
+            <span class="text-muted small">(4.2 · 1,247 students)</span>
+          </div>
         </div>
-        <div class="d-flex flex-wrap gap-2 mb-3" id="d-badges"></div>
-        <p class="text-muted" id="d-desc"></p>
-        <div class="d-flex flex-wrap gap-1 mb-4" id="d-tags"></div>
-        <button class="btn btn-primary" onclick="trackAndEnroll()">
-          <i class="bi bi-play-circle me-2"></i>Enroll Now
-        </button>
-        <button class="btn btn-outline-secondary ms-2" onclick="wishlist()">
-          <i class="bi bi-heart me-2"></i>Wishlist
-        </button>
+        <div class="col-lg-4 text-center text-lg-end mt-3 mt-lg-0">
+          <div class="mb-3">
+            <span class="price-big" id="d-price">Free</span>
+          </div>
+          <button class="btn btn-primary action-btn w-100 mb-2" onclick="enrollNow()">
+            <i class="bi bi-play-circle me-2"></i>Enroll Now
+          </button>
+          <button class="btn btn-outline-secondary action-btn w-100 mb-2" onclick="addToCart()">
+            <i class="bi bi-cart-plus me-2"></i>Add to Cart
+          </button>
+          <button class="btn btn-outline-danger btn-sm w-100" onclick="wishlist()">
+            <i class="bi bi-heart me-2"></i>Save to Wishlist
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Course Info Cards -->
+    <div class="row g-3 mb-4">
+      <div class="col-md-4">
+        <div class="card text-center p-3">
+          <i class="bi bi-clock text-info fs-4 mb-1"></i>
+          <div class="fw-bold" id="d-duration">—</div>
+          <small class="text-muted">Duration</small>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card text-center p-3">
+          <i class="bi bi-bar-chart text-success fs-4 mb-1"></i>
+          <div class="fw-bold" id="d-difficulty">—</div>
+          <small class="text-muted">Difficulty</small>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card text-center p-3">
+          <i class="bi bi-folder text-warning fs-4 mb-1"></i>
+          <div class="fw-bold" id="d-category">—</div>
+          <small class="text-muted">Category</small>
+        </div>
+      </div>
+    </div>
+
+    <!-- Secure Checkout Notice -->
+    <div class="card border-success border-opacity-25">
+      <div class="card-body d-flex align-items-center gap-3 py-3">
+        <i class="bi bi-shield-check text-success fs-4"></i>
+        <div>
+          <div class="fw-semibold small">30-Day Money-Back Guarantee</div>
+          <div class="text-muted small">Full refund if you're not satisfied, no questions asked. Secure payment via Stripe.</div>
+        </div>
+        <div class="ms-auto d-flex gap-2 align-items-center">
+          <i class="bi bi-credit-card text-muted"></i>
+          <i class="bi bi-paypal text-muted"></i>
+          <i class="bi bi-wallet2 text-muted"></i>
+        </div>
       </div>
     </div>
   </div>
@@ -33,15 +97,20 @@ const token = localStorage.getItem('access_token');
 async function loadDetail(){
   const r = await fetch('/api/v1/products/'+productId,
     { headers: token ? {'Authorization':'Bearer '+token} : {} });
-  if(!r.ok){ document.getElementById('detail-loading').innerHTML='<p class="text-danger">Product not found.</p>'; return; }
+  if(!r.ok){ document.getElementById('detail-loading').innerHTML='<p class="text-danger">Course not found.</p>'; return; }
   const p = await r.json();
   document.getElementById('d-title').textContent = p.title;
-  document.getElementById('d-price').textContent = (p.price===null||p.price===0) ? 'Free' : '$'+p.price;
-  document.getElementById('d-desc').textContent = p.description || 'No description.';
+  const priceEl = document.getElementById('d-price');
+  if(p.price===null||p.price===0){ priceEl.textContent='Free'; priceEl.className='price-big price-free'; }
+  else { priceEl.textContent='$'+p.price; priceEl.className='price-big price-paid'; }
+  document.getElementById('d-desc').textContent = p.description || 'No description available.';
+  document.getElementById('d-duration').textContent = p.duration ? p.duration+' minutes' : 'Self-paced';
+  document.getElementById('d-difficulty').textContent = (p.difficulty||'All levels').charAt(0).toUpperCase()+(p.difficulty||'all levels').slice(1);
+  document.getElementById('d-category').textContent = (p.category||'General').replace(/-/g,' ');
   document.getElementById('d-badges').innerHTML = [
     p.category ? `<span class="badge bg-primary">${p.category}</span>` : '',
     p.difficulty ? `<span class="badge bg-secondary">${p.difficulty}</span>` : '',
-    p.duration ? `<span class="badge bg-dark">${p.duration} min</span>` : '',
+    '<span class="badge bg-dark border">Bestseller</span>',
   ].join('');
   document.getElementById('d-tags').innerHTML = (p.tags||[]).map(t=>`<span class="badge bg-dark border text-muted">${t}</span>`).join('');
   document.getElementById('detail-loading').classList.add('d-none');
@@ -49,15 +118,20 @@ async function loadDetail(){
   if(window._tracker) window._tracker.track('view', productId);
 }
 
-function trackAndEnroll(){
-  if(window._tracker) window._tracker.track('click', productId);
-  showToast('Enrolled! Track your progress on the dashboard.','success');
+function enrollNow(){
+  if(window._tracker) window._tracker.track('purchase', productId);
+  showToast('Enrolled successfully! Start learning now.','success');
 }
 
-async function wishlist(){
+function addToCart(){
+  if(window._tracker) window._tracker.track('click', productId);
+  showToast('Added to cart!','info');
+}
+
+function wishlist(){
   if(!token){ showToast('Please login first.','warning'); return; }
   if(window._tracker) window._tracker.track('wishlist', productId);
-  showToast('Added to wishlist!','success');
+  showToast('Saved to wishlist ❤️','success');
 }
 
 loadDetail();

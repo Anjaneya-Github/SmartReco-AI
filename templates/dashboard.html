@@ -1,94 +1,122 @@
 {% extends "base.html" %}
-{% block title %}My Dashboard — SmartReco AI{% endblock %}
+{% block title %}My Learning Dashboard — SmartReco AI{% endblock %}
+{% block extra_head %}
+<style>
+  .hero-banner { background: linear-gradient(135deg, #1a1a3e 0%, #0d6efd22 100%); border:1px solid #2a2a4e; border-radius:12px; }
+  .course-card { transition: transform .2s, box-shadow .2s; cursor:pointer; }
+  .course-card:hover { transform: translateY(-4px); box-shadow: 0 8px 25px rgba(13,110,253,.15); }
+  .price-tag { font-size:1.1rem; font-weight:700; }
+  .price-free { color: #28a745; }
+  .price-paid { color: #0dcaf0; }
+  .ai-story-card { background: linear-gradient(135deg, #1e1e2e 0%, #1a2a3e 100%); border: 1px solid #0d6efd44; }
+  .stat-mini { text-align:center; padding:12px 8px; }
+  .stat-mini h4 { margin:0; font-weight:800; }
+  .stat-mini small { color:#888; font-size:.7rem; text-transform:uppercase; letter-spacing:.5px; }
+  .cart-btn { transition: all .2s; }
+  .cart-btn:hover { transform: scale(1.05); }
+</style>
+{% endblock %}
 {% block content %}
 <div class="container-fluid px-4 py-4">
-  <!-- Welcome Banner -->
-  <div class="card mb-4 border-primary" style="border-left:4px solid #0d6efd!important">
-    <div class="card-body d-flex align-items-center gap-3">
-      <i class="bi bi-person-circle text-primary" style="font-size:2.5rem"></i>
-      <div>
-        <h5 class="mb-0 fw-bold" id="welcome-name">Welcome back!</h5>
-        <span class="text-muted small" id="welcome-sub">Loading your personalised feed…</span>
+
+  <!-- ══ Hero Banner ══════════════════════════════════════════════ -->
+  <div class="hero-banner p-4 mb-4">
+    <div class="d-flex align-items-center gap-3">
+      <div class="rounded-circle bg-primary bg-opacity-25 d-flex align-items-center justify-content-center" style="width:56px;height:56px">
+        <i class="bi bi-mortarboard-fill text-primary" style="font-size:1.6rem"></i>
       </div>
-      <div class="ms-auto text-end">
-        <span class="badge" id="cache-badge"></span>
+      <div class="flex-grow-1">
+        <h4 class="mb-0 fw-bold" id="welcome-name">Welcome back!</h4>
+        <p class="text-muted mb-0 small" id="welcome-sub">Your personalized learning journey awaits</p>
+      </div>
+      <div class="d-flex gap-2">
+        <span class="badge bg-dark border" id="cache-badge"></span>
+        <a href="/products" class="btn btn-primary btn-sm"><i class="bi bi-grid me-1"></i>Browse All Courses</a>
       </div>
     </div>
   </div>
 
+  <!-- ══ Quick Stats Row ══════════════════════════════════════════ -->
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+      <div class="card stat-mini"><h4 class="text-primary" id="stat-events">0</h4><small>Interactions</small></div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card stat-mini"><h4 class="text-info" id="stat-engagement">0%</h4><small>Engagement</small></div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card stat-mini"><h4 class="text-warning" id="stat-confidence">—</h4><small>AI Confidence</small></div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card stat-mini"><h4 class="text-success" id="stat-level">—</h4><small>Level</small></div>
+    </div>
+  </div>
+
   <div class="row g-4">
-    <!-- LEFT: Behavior Summary + Activity -->
+    <!-- ══ LEFT COLUMN ════════════════════════════════════════════ -->
     <div class="col-lg-4">
-      <div class="card mb-4">
-        <div class="card-header fw-semibold"><i class="bi bi-graph-up me-2 text-info"></i>Behavior Summary</div>
-        <div class="card-body">
-          <div class="mb-2"><span class="text-muted small">Engagement</span>
-            <div class="progress mt-1" style="height:6px"><div class="progress-bar" id="eng-bar" style="width:0%"></div></div>
-            <span class="small" id="eng-score">—</span>
+      <!-- AI Recommendation Story -->
+      <div class="card ai-story-card mb-4">
+        <div class="card-header d-flex align-items-center justify-content-between border-0 bg-transparent pt-3">
+          <span class="fw-semibold"><i class="bi bi-stars me-2 text-warning"></i>Your AI Insights</span>
+          <span class="badge" id="confidence-badge">—</span>
+        </div>
+        <div class="card-body pt-1">
+          <p class="mb-2" id="reco-summary" style="line-height:1.6">Interact with some courses to unlock your personalized AI recommendations.</p>
+          <p class="text-muted small mb-3" id="reco-reasoning"></p>
+          <div class="small text-muted mb-2" id="reco-time"></div>
+          <div class="small mb-2"><i class="bi bi-cpu me-1 text-info"></i><span id="ai-model">—</span></div>
+          <div class="small"><i class="bi bi-diagram-3 me-1 text-primary"></i>Evidence: <span id="evidence-cats" class="text-muted">none yet</span></div>
+          <!-- Feedback -->
+          <div class="d-flex gap-2 mt-3 pt-2 border-top border-secondary" id="feedback-area" style="display:none!important">
+            <span class="text-muted small me-2 align-self-center">Was this helpful?</span>
+            <button class="btn btn-outline-success btn-sm cart-btn" onclick="sendFeedback(true)">
+              <i class="bi bi-hand-thumbs-up"></i> Yes
+            </button>
+            <button class="btn btn-outline-danger btn-sm cart-btn" onclick="sendFeedback(false)">
+              <i class="bi bi-hand-thumbs-down"></i> No
+            </button>
           </div>
-          <div class="mb-2"><span class="text-muted small">Learning Level</span><br/><span class="badge bg-secondary" id="learn-level">—</span></div>
-          <div class="mb-2"><span class="text-muted small">Top Categories</span>
-            <div id="top-cats" class="d-flex flex-wrap gap-1 mt-1"></div>
-          </div>
-          <div class="mb-2"><span class="text-muted small">Top Tags</span>
-            <div id="top-tags" class="d-flex flex-wrap gap-1 mt-1"></div>
-          </div>
-          <div class="mt-3"><span class="text-muted small">Recent Activity</span><br/>
-            <span class="small" id="recent-summary">—</span></div>
         </div>
       </div>
 
+      <!-- Interests -->
+      <div class="card mb-4">
+        <div class="card-header fw-semibold"><i class="bi bi-heart-fill me-2 text-danger"></i>Your Interests</div>
+        <div class="card-body">
+          <div class="mb-3"><span class="text-muted small d-block mb-1">Categories</span>
+            <div id="top-cats" class="d-flex flex-wrap gap-1"></div>
+          </div>
+          <div class="mb-3"><span class="text-muted small d-block mb-1">Topics</span>
+            <div id="top-tags" class="d-flex flex-wrap gap-1"></div>
+          </div>
+          <div><span class="text-muted small d-block mb-1">Recent Searches</span>
+            <div id="search-tags" class="d-flex flex-wrap gap-1"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Activity Timeline -->
       <div class="card">
-        <div class="card-header fw-semibold"><i class="bi bi-clock-history me-2 text-warning"></i>Activity Timeline</div>
-        <ul class="list-group list-group-flush" id="timeline-list">
+        <div class="card-header fw-semibold"><i class="bi bi-clock-history me-2 text-warning"></i>Recent Activity</div>
+        <ul class="list-group list-group-flush" id="timeline-list" style="max-height:300px;overflow-y:auto">
           <li class="list-group-item text-muted small">Loading…</li>
         </ul>
       </div>
     </div>
 
-    <!-- RIGHT: Recommendation -->
+    <!-- ══ RIGHT COLUMN — Recommended Courses ═════════════════════ -->
     <div class="col-lg-8">
-      <div class="card mb-4">
-        <div class="card-header d-flex align-items-center justify-content-between">
-          <span class="fw-semibold"><i class="bi bi-stars me-2 text-warning"></i>AI Recommendation Story</span>
-          <div class="d-flex align-items-center gap-2">
-            <span class="badge" id="confidence-badge">—</span>
-            <span class="text-muted small" id="reco-time"></span>
-          </div>
-        </div>
-        <div class="card-body">
-          <p id="reco-summary" class="mb-1">Loading recommendations…</p>
-          <p id="reco-reasoning" class="text-muted small mb-3"></p>
-          <div class="mb-2">
-            <span class="text-muted small"><i class="bi bi-search me-1"></i>Evidence Used: </span>
-            <span id="evidence-cats" class="small"></span>
-          </div>
-          <div class="mb-2">
-            <span class="text-muted small"><i class="bi bi-robot me-1"></i>AI Model: </span>
-            <span id="ai-model" class="small text-info"></span>
-          </div>
-          <!-- Feedback -->
-          <div class="d-flex gap-2 mt-3" id="feedback-area" style="display:none!important">
-            <button class="btn btn-outline-success btn-sm" onclick="sendFeedback(true)">
-              <i class="bi bi-hand-thumbs-up"></i> Helpful
-            </button>
-            <button class="btn btn-outline-danger btn-sm" onclick="sendFeedback(false)">
-              <i class="bi bi-hand-thumbs-down"></i> Not helpful
-            </button>
-          </div>
-        </div>
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="fw-bold mb-0"><i class="bi bi-lightning-charge-fill me-2 text-warning"></i>Recommended For You</h5>
+        <span class="text-muted small" id="recent-summary"></span>
       </div>
-
-      <!-- Recommended Products Grid -->
-      <h6 class="text-muted mb-3"><i class="bi bi-collection me-2"></i>Recommended Courses</h6>
       <div class="row g-3" id="products-grid">
-        <div class="col-12 text-muted">Loading…</div>
-      </div>
-
-      <!-- Recent Searches -->
-      <div class="card mt-4">
-        <div class="card-header fw-semibold"><i class="bi bi-search me-2 text-primary"></i>Recent Searches</div>
-        <div class="card-body"><div id="search-tags" class="d-flex flex-wrap gap-2"></div></div>
+        <div class="col-12 text-center py-5 text-muted">
+          <i class="bi bi-search" style="font-size:2rem"></i>
+          <p class="mt-2">Browse some courses to get personalized recommendations</p>
+          <a href="/products" class="btn btn-outline-primary btn-sm">Explore Courses</a>
+        </div>
       </div>
     </div>
   </div>
